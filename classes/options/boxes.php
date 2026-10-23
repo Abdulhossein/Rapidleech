@@ -3,6 +3,7 @@ function boxes() {
 	global $list, $options, $PHP_SELF;
 ?>
 <form method="post" action="<?php echo $PHP_SELF; ?>"><input type="hidden" name="act" value="boxes_go" />
+<?php echo rl_csrf_field(); ?>
 <?php
 	echo count ( $_GET ["files"] ) . " file" . (count ( $_GET ["files"] ) > 1 ? "s" : "") . ":<br />";
 	for($i = 0; $i < count ( $_GET ["files"] ); $i ++) {

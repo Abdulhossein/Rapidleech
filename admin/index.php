@@ -12,19 +12,46 @@ define('CONFIG_DIR', $configDir . '/');
 define('CLASS_DIR', $rootDir . '/classes/');
 require_once($configDir . '/config.php');
 require_once($rootDir . '/classes/logger.php');
+require_once($rootDir . '/classes/security.php');
 $ADMIN_USER = isset($options['admin_user']) ? $options['admin_user'] : 'admin';
 $ADMIN_PASS = isset($options['admin_pass']) ? $options['admin_pass'] : 'admin';
 
+// Brute-force lockout (per IP+user, exponential backoff) — silent when file unwritable
+$lockKey = 'admin|' . rl_client_ip();
+RL_Lockout::gc();
+$lockOk = RL_Lockout::check($lockKey);
+$badCreds = empty($_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_USER, $_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_PASS, $_SERVER['PHP_AUTH_PW']);
+if ($badCreds) {
+	if ($lockOk) RL_Lockout::fail($lockKey);
+} else {
+	RL_Lockout::reset($lockKey);
+}
 // Basic auth
-if (empty($_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_USER, $_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_PASS, $_SERVER['PHP_AUTH_PW'])) {
-    header('WWW-Authenticate: Basic realm="RapidLeech Admin"');
-    header('HTTP/1.0 401 Unauthorized');
-    die('Access Denied');
+if ($badCreds || !$lockOk) {
+	if (function_exists('rl_log')) rl_log('WARN', 'Admin login failed' . (!$lockOk ? ' (locked out)' : ''), array('ip' => rl_client_ip()));
+	header('WWW-Authenticate: Basic realm="RapidLeech Admin"');
+	header('HTTP/1.0 401 Unauthorized');
+	die('Access Denied');
+}
+
+// TOTP 2FA (optional): second step via ?otp= or X-RL-OTP header; disabled when no secret configured
+$ADMIN_TOTP_SECRET = isset($options['admin_totp_secret']) ? trim((string)$options['admin_totp_secret']) : '';
+if ($ADMIN_TOTP_SECRET !== '') {
+	$otp = '';
+	if (!empty($_GET['otp']) && is_string($_GET['otp'])) $otp = $_GET['otp'];
+	elseif (!empty($_SERVER['HTTP_X_RL_OTP']) && is_string($_SERVER['HTTP_X_RL_OTP'])) $otp = $_SERVER['HTTP_X_RL_OTP'];
+	elseif (!empty($_POST['rl_otp']) && is_string($_POST['rl_otp'])) $otp = $_POST['rl_otp'];
+	if (!RL_TOTP::verify($ADMIN_TOTP_SECRET, $otp)) {
+		header('HTTP/1.0 401 Unauthorized');
+		header('X-RL-OTP-Required: 1');
+		die('One-time code required. Append ?otp=123456 (from your authenticator app) to the URL.');
+	}
 }
 
 $filesDir = $rootDir . '/files';
 $accountsFile = $configDir . '/accounts.php';
 $configFile = $configDir . '/config.php';
+$htaccessFile = $rootDir . '/.htaccess';
 
 // Helper: Get installed yt-dlp version
 function getInstalledYtdlpVersion() {
@@ -132,7 +159,7 @@ function admin_settings_schema() {
             'download_dir' => array('Download directory', 'text', 'Relative to RapidLeech root, e.g. files/'),
             'download_dir_is_changeable' => array('Users may change download dir', 'bool', ''),
             'delete_delay' => array('Auto-delete delay (seconds)', 'num', 'Files are removed after this time (84600 ≈ 23.5 h)'),
-            'file_size_limit' => array('Max file size (KB)', 'num', 'Transloads larger than this are rejected'),
+            'file_size_limit' => array('Max file size (MiB)', 'num', 'Transloads and local uploads larger than this are rejected'),
             'rename_prefix' => array('Filename prefix', 'text', ''),
             'rename_suffix' => array('Filename suffix', 'text', ''),
             'rename_underscore' => array('Replace spaces with underscores', 'bool', ''),
@@ -157,6 +184,10 @@ function admin_settings_schema() {
             'fgc' => array('file_get_contents mode', 'num', '0 = off'),
             'parallel_download' => array('Parallel chunked downloads', 'bool', ''),
             'parallel_chunks' => array('Chunks per download', 'num', '1-16 recommended'),
+            'dedup_enabled' => array('Share identical downloads', 'bool', 'Concurrent requests for the same link join the first download instead of re-downloading'),
+            'selfheal_enabled' => array('Self-heal downloads', 'bool', 'Disk-space pre-check and automatic retry on failure'),
+            'selfheal_max_retries' => array('Self-heal max retries', 'num', '0-5'),
+            'selfheal_verify_checksum' => array('Self-heal checksum verify', 'bool', 'Verify SHA-256 after download when a hash is provided'),
             'ytdlp_binary' => array('yt-dlp binary path', 'ytdlp', 'Empty = auto-detect'),
         ),
         'Interface' => array(
@@ -199,6 +230,10 @@ function admin_settings_schema() {
             'forbidden_filetypes_block' => array('Block forbidden types', 'bool', 'Off = rename instead of block'),
             'rename_these_filetypes_to' => array('Rename blocked types to', 'text', ''),
             'check_these_before_unzipping' => array('Check forbidden types inside archives', 'bool', ''),
+        ),
+        'Local Upload' => array(
+            'local_upload_allow_all' => array('Accept all file types for local upload', 'bool', 'On = any file type accepted (stored as inert data; files/.htaccess blocks script execution). Off = only types listed below'),
+            'local_upload_allowed_types' => array('Allowed types when allow-all is off (one per line)', 'list', 'Extensions without dot, e.g. zip'),
         ),
     );
 }
@@ -407,8 +442,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
         case 'save_accounts':
             $content = $_POST['accounts_content'] ?? '';
-            // Guard: block content that injects PHP execution tags
-            if (preg_match('/<\?(?!xml\s)/i', $content) || stripos($content, '<%') !== false) {
+            // Guard: allow the file's own leading <?php header, block injected PHP/script tags
+            $body = preg_replace('/^\s*<\?php\b/i', '', $content, 1);
+            if (preg_match('/<\?(?!xml\s)/i', $body) || stripos($body, '<%') !== false) {
                 $message = 'Rejected: content contains PHP/script tags.';
                 $messageType = 'error';
                 break;
@@ -430,11 +466,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($schema as $group) {
                 foreach ($group as $key => $def) {
                     $type = $def[1];
-                    // Field absent from POST (e.g. collapsed group) = keep current value
-                    if (!array_key_exists('cfg_' . $key, $_POST)) continue;
+                    // Checkboxes are absent from POST when unchecked — handle bools first
                     if ($type === 'bool') {
                         $new[$key] = !empty($_POST['cfg_' . $key]);
-                    } elseif ($type === 'num') {
+                        continue;
+                    }
+                    // Field absent from POST (e.g. collapsed group) = keep current value
+                    if (!array_key_exists('cfg_' . $key, $_POST)) continue;
+                    if ($type === 'num') {
                         $raw = trim($_POST['cfg_' . $key] ?? '');
                         if ($raw === '') continue; // empty = keep current
                         $new[$key] = is_numeric($raw) ? $raw + 0 : $opts[$key];
@@ -470,7 +509,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             }
             if ((int)$new['file_size_limit'] < 1) {
-                $message = 'Max file size must be at least 1 KB.';
+                $message = 'Max file size must be at least 1 MiB.';
                 $messageType = 'error';
                 break;
             }
@@ -491,14 +530,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             }
             rl_log_admin('Save config', 'Settings form saved (' . count($new) . ' options)');
-            $message = 'Configuration saved successfully. Reload the page to apply changes.';
+            $options = $new; // render the form with the saved values immediately
+            $message = 'Configuration saved successfully.';
             $messageType = 'success';
             break;
 
         case 'save_config_raw':
             $content = $_POST['config_content'] ?? '';
-            // Guard: block content that injects PHP execution tags
-            if (preg_match('/<\?(?!xml\s)/i', $content) || stripos($content, '<%') !== false) {
+            // Guard: allow the file's own leading <?php header, block injected PHP/script tags
+            $body = preg_replace('/^\s*<\?php\b/i', '', $content, 1);
+            if (preg_match('/<\?(?!xml\s)/i', $body) || stripos($body, '<%') !== false) {
                 $message = 'Rejected: content contains PHP/script tags.';
                 $messageType = 'error';
                 break;
@@ -509,6 +550,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $messageType = 'success';
             } else {
                 $message = 'Failed to save config file. Check permissions.';
+                $messageType = 'error';
+            }
+            break;
+
+        case 'save_htaccess':
+            $content = $_POST['htaccess_content'] ?? '';
+            // Guard: block content that injects PHP execution tags
+            if (preg_match('/<\?(?!xml\s)/i', $content) || stripos($content, '<%') !== false) {
+                $message = 'Rejected: content contains PHP/script tags.';
+                $messageType = 'error';
+                break;
+            }
+            // Safety net: never let an edit disable script execution blocking in files/
+            $filesHt = @file_get_contents($rootDir . '/files/.htaccess');
+            if ($filesHt !== false && $filesHt !== '' && stripos($content, 'AllowOverride') !== false && preg_match('/AllowOverride\s+None/i', $content)) {
+                $message = 'Rejected: AllowOverride None would disable .htaccess protection in files/.';
+                $messageType = 'error';
+                break;
+            }
+            if (@file_put_contents($htaccessFile, $content, LOCK_EX) !== false) {
+                rl_log_admin('Save .htaccess', 'Root .htaccess updated (' . strlen($content) . ' bytes)');
+                $message = '.htaccess saved successfully. Reload the page to apply changes.';
+                $messageType = 'success';
+            } else {
+                $message = 'Failed to save .htaccess. Check permissions.';
                 $messageType = 'error';
             }
             break;
@@ -552,6 +618,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $resetType = $fullReset ? 'Full reset (configs overwritten)' : 'Configs preserved';
             $message = "Git update completed. $resetType.";
             $messageType = 'success';
+            break;
+
+        case 'git_update_hosts':
+            // Update only hosts/ (download & upload plugins) from GitHub — configs, classes, templates untouched
+            $repoUrl = trim($_POST['repo_url'] ?? 'https://github.com/Abdulhossein/Rapidleech');
+            $branch = trim($_POST['repo_branch'] ?? 'main');
+            if (!preg_match('/^https:\/\/[a-zA-Z0-9._\-\/]+$/', $repoUrl)) {
+                $message = 'Invalid repository URL.';
+                $messageType = 'error';
+                break;
+            }
+            if (!preg_match('/^[a-zA-Z0-9._\-\/]+$/', $branch)) {
+                $message = 'Invalid branch name.';
+                $messageType = 'error';
+                break;
+            }
+            $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+            $tmpBase = rtrim(sys_get_temp_dir(), '/\\') . '/rl_hosts_update_' . getmypid();
+            @mkdir($tmpBase, 0777, true);
+            $tmpDir = $tmpBase . '/repo';
+            $repoUrlEsc = escapeshellarg($repoUrl);
+            $branchEsc = escapeshellarg($branch);
+            $tmpEsc = escapeshellarg($tmpDir);
+            $tmpBaseEsc = escapeshellarg($tmpBase);
+            $hostsEsc = escapeshellarg($rootDir . '/hosts');
+            if ($isWin) {
+                // Windows: robocopy /MIR mirrors hosts/ (delete removed plugins); exit codes 0-7 are success
+                $cmd = "rmdir /s /q " . escapeshellarg($tmpBase) . " 2>nul & mkdir " . escapeshellarg($tmpBase) . " && git clone --depth 1 --single-branch --branch $branchEsc $repoUrlEsc $tmpEsc 2>&1 && robocopy " . escapeshellarg($tmpDir . '/hosts') . " " . escapeshellarg($rootDir . '/hosts') . " /MIR /NJH /NDL & if %ERRORLEVEL% LEQ 7 (echo HOSTS_UPDATED) else (echo HOSTS_FAILED)";
+            } else {
+                $cmd = "rm -rf $tmpBaseEsc && mkdir -p $tmpBaseEsc && git clone --depth 1 --single-branch --branch $branchEsc $repoUrlEsc $tmpEsc 2>&1 && cp -a $tmpEsc/hosts/. $hostsEsc/ && echo HOSTS_UPDATED";
+            }
+            $output = shell_exec($cmd);
+            if ($isWin && strpos((string)$output, 'HOSTS_FAILED') !== false) {
+                $message = 'Hosts update failed. Check output below.';
+                $messageType = 'error';
+            } elseif (strpos((string)$output, 'HOSTS_UPDATED') === false && !$isWin) {
+                $message = 'Hosts update failed. Check output below.';
+                $messageType = 'error';
+            } else {
+                $message = 'Hosts plugins updated from GitHub. Configs, classes and templates untouched.';
+                $messageType = 'success';
+                rl_log_admin('Update hosts', 'hosts/ refreshed from ' . $repoUrl . '#' . $branch);
+            }
+            @shell_exec((($isWin ? 'rmdir /s /q ' : 'rm -rf ') . escapeshellarg($tmpBase)) . ' 2>&1');
             break;
 
         case 'install_deno':
@@ -673,6 +783,9 @@ if (is_dir($filesDir)) {
 $accountsContent = @file_get_contents($accountsFile) ?: '';
 // Get config content
 $configContent = @file_get_contents($configFile) ?: '';
+// Get root .htaccess content
+$htaccessContent = @file_get_contents($htaccessFile) ?: '';
+$htaccessWritable = is_writable($htaccessFile) || (!file_exists($htaccessFile) && is_writable($rootDir));
 
 // Get disk info
 $diskFree = @disk_free_space($filesDir);
@@ -778,6 +891,47 @@ label.check input{accent-color:#6366f1}
             </div>
         </div>
         <div class="bar-track"><div class="bar-fill" style="width:<?php echo $diskUsedPercent; ?>%"></div></div>
+    </div>
+
+    <!-- PHP Limits -->
+    <div class="card">
+        <h2>🐘 PHP Upload Limits</h2>
+        <h3>PHP-level limits that override RapidLeech settings. Local uploads larger than <b>post_max_size</b> are rejected by PHP before the script runs.</h3>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-val" style="font-size:16px"><?php echo htmlspecialchars((string)ini_get('upload_max_filesize')); ?></div>
+                <div class="stat-label">upload_max_filesize</div>
+            </div>
+            <div class="stat">
+                <div class="stat-val" style="font-size:16px"><?php echo htmlspecialchars((string)ini_get('post_max_size')); ?></div>
+                <div class="stat-label">post_max_size</div>
+            </div>
+            <div class="stat">
+                <div class="stat-val" style="font-size:16px"><?php echo htmlspecialchars((string)ini_get('memory_limit')); ?></div>
+                <div class="stat-label">memory_limit</div>
+            </div>
+            <div class="stat">
+                <div class="stat-val" style="font-size:16px"><?php echo htmlspecialchars((string)ini_get('max_execution_time')); ?>s</div>
+                <div class="stat-label">max_execution_time</div>
+            </div>
+            <div class="stat">
+                <div class="stat-val" style="font-size:16px"><?php echo htmlspecialchars((string)ini_get('max_input_time')); ?>s</div>
+                <div class="stat-label">max_input_time</div>
+            </div>
+        </div>
+        <?php $sapi = php_sapi_name(); ?>
+        <div style="font-size:12px;color:#a0a8c0;line-height:1.6">
+            <span class="tag <?php echo (stripos($sapi, 'apache') !== false) ? 'tag-green' : 'tag-yellow'; ?>"><?php echo htmlspecialchars($sapi); ?></span>
+            <?php if (stripos($sapi, 'apache') !== false): ?>
+            To raise these limits, add to <code>.htaccess</code> in the RapidLeech root (mod_php):<br>
+            <code style="color:#818cf8">php_value upload_max_filesize 8G</code> &nbsp; <code style="color:#818cf8">php_value post_max_size 8G</code> &nbsp; <code style="color:#818cf8">php_value max_execution_time 0</code>
+            <?php elseif (stripos($sapi, 'fpm') !== false || stripos($sapi, 'cgi') !== false): ?>
+            To raise these limits, create <code>.user.ini</code> in the RapidLeech root (PHP-FPM/CGI; changes may take up to user_ini.cache_ttl seconds):<br>
+            <code style="color:#818cf8">upload_max_filesize = 8G</code> &nbsp; <code style="color:#818cf8">post_max_size = 8G</code> &nbsp; <code style="color:#818cf8">max_execution_time = 0</code>
+            <?php else: ?>
+            PHP limit overrides are not available for this SAPI; edit php.ini directly.
+            <?php endif; ?>
+        </div>
     </div>
 
     <!-- Active Downloads -->
@@ -903,6 +1057,34 @@ label.check input{accent-color:#6366f1}
             <br><br>
             <button type="submit" class="btn btn-primary">💾 Save Accounts</button>
         </form>
+    </div>
+
+    <!-- .htaccess Editor -->
+    <div class="card">
+        <h2>📄 .htaccess (Apache)</h2>
+        <h3>Edit the root <code>.htaccess</code> — raise PHP upload limits here on mod_php hosts (php_value / php_flag directives). Changes apply immediately, no reload needed.</h3>
+        <?php if (!$htaccessWritable): ?>
+        <div class="msg msg-error">.htaccess is not writable by the web server. Fix file permissions to enable editing.</div>
+        <?php else: ?>
+        <form method="POST" onsubmit="return confirm('Invalid directives can make the whole site return a 500 error. Continue?');">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
+            <input type="hidden" name="action" value="save_htaccess">
+            <textarea name="htaccess_content" rows="20" style="font-family:'Consolas','Monaco',monospace;font-size:12px"><?php echo htmlspecialchars($htaccessContent); ?></textarea>
+            <br><br>
+            <button type="submit" class="btn btn-primary">💾 Save .htaccess</button>
+        </form>
+        <details style="margin-top:12px">
+            <summary style="cursor:pointer;color:#818cf8;font-size:13px">Common upload-limit snippets</summary>
+            <div style="font-size:12px;color:#a0a8c0;line-height:1.7;margin-top:8px">
+                <code style="color:#818cf8">php_value upload_max_filesize 8G</code><br>
+                <code style="color:#818cf8">php_value post_max_size 8G</code><br>
+                <code style="color:#818cf8">php_value max_execution_time 0</code><br>
+                <code style="color:#818cf8">php_value max_input_time 3600</code><br>
+                <code style="color:#818cf8">php_value memory_limit 512M</code><br>
+                Only works with mod_php (apache2handler). On PHP-FPM/CGI use <code>.user.ini</code> instead — see the PHP Upload Limits card above.
+            </div>
+        </details>
+        <?php endif; ?>
     </div>
 
     <!-- RAR Update -->
@@ -1031,10 +1213,9 @@ label.check input{accent-color:#6366f1}
     <!-- Git Update -->
     <div class="card">
         <h2>🔄 Update from GitHub</h2>
-        <h3>Pulls latest code from a GitHub repo.</h3>
-        <form method="POST" onsubmit="return confirm(document.getElementById('full_reset').checked ? 'FULL RESET: This will OVERWRITE config.php and accounts.php with repo defaults!' : 'This will update code. Your accounts and config will be preserved.');">
+        <h3>Pull the whole code, or only the hosts/ plugins folder — separately.</h3>
+        <form method="POST" onsubmit="var m=this.querySelector('[name=update_mode]:checked').value;var fr=document.getElementById('full_reset').checked;return confirm(m==='hosts' ? 'Update ONLY the hosts/ plugins folder from GitHub? Everything else stays untouched.' : (fr ? 'FULL RESET: This will OVERWRITE config.php and accounts.php with repo defaults!' : 'This will update code. Your accounts and config will be preserved.'));">
             <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
-            <input type="hidden" name="action" value="git_update">
             <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px">
                 <div>
                     <label style="display:block;font-size:12px;color:#606880;margin-bottom:4px">Repository URL</label>
@@ -1045,16 +1226,30 @@ label.check input{accent-color:#6366f1}
                     <input type="text" name="repo_branch" placeholder="main" value="<?php echo htmlspecialchars($_POST['repo_branch'] ?? 'main'); ?>">
                 </div>
             </div>
-            <div class="flex" style="margin-bottom:12px">
+            <div class="flex" style="margin-bottom:12px;flex-wrap:wrap;gap:14px">
+                <label class="check"><input type="radio" name="update_mode" value="full" checked> 📦 Whole code (git reset)</label>
+                <label class="check"><input type="radio" name="update_mode" value="hosts"> 🧩 Only hosts/ plugins</label>
+            </div>
+            <div class="flex" id="fullreset-row" style="margin-bottom:12px">
                 <label class="check"><input type="checkbox" name="full_reset" id="full_reset" value="1"> ⚠️ Full Reset (overwrite config.php & accounts.php)</label>
             </div>
             <div class="flex">
-                <button type="submit" class="btn btn-primary">🔄 Update from GitHub</button>
+                <button type="submit" class="btn btn-primary" onclick="this.form.action.value=this.form.querySelector('[name=update_mode]:checked').value==='hosts'?'git_update_hosts':'git_update'">🔄 Update from GitHub</button>
             </div>
+            <input type="hidden" name="action" value="git_update">
         </form>
-        <?php if (isset($output) && ($_POST['action'] ?? '') === 'git_update'): ?>
+        <?php if (isset($output) && in_array($_POST['action'] ?? '', ['git_update', 'git_update_hosts'], true)): ?>
         <div class="output"><?php echo htmlspecialchars($output); ?></div>
         <?php endif; ?>
+        <script>
+        (function(){
+            var f=document.querySelector('input[name=update_mode][value=hosts]');
+            var row=document.getElementById('fullreset-row');
+            if(f&&row){f.addEventListener('change',function(){row.style.display=f.checked?'none':'';});
+            var w=document.querySelector('input[name=update_mode][value=full]');
+            if(w)w.addEventListener('change',function(){if(w.checked)row.style.display='';});}
+        })();
+        </script>
     </div>
 
     <!-- Run Command -->

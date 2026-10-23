@@ -6,6 +6,7 @@ function rar() {
   else {
 ?>
   <form name="rar_files" method="post" action="<?php echo $PHP_SELF; ?>">
+  <?php echo rl_csrf_field(); ?>
     <table align="center" class="rar-table">
       <tr>
         <td>

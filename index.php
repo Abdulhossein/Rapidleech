@@ -263,6 +263,67 @@ if (empty($_GET['filename']) || empty($_GET['host']) || empty($_GET['path'])) {
 		while (strpos($pathWithName, "\\\\") !== false) $pathWithName = str_replace("\\\\", "\\", $pathWithName);
 		if (strpos($pathWithName, '?') !== false) $pathWithName = substr($pathWithName, 0, strpos($pathWithName, '?'));
 
+		// Self-heal: refuse downloads that will not fit on disk (silent when unavailable)
+		if (is_file(CLASS_DIR . 'selfheal.php')) {
+			require_once(CLASS_DIR . 'selfheal.php');
+			$_knownSizePre = (!empty($_GET['T8']['fileSize']) && is_numeric($_GET['T8']['fileSize'])) ? (int)$_GET['T8']['fileSize'] : 0;
+			if ($_knownSizePre > 0 && !RL_SelfHeal::diskFit($_knownSizePre)) {
+				if (function_exists('rl_log_download_error')) {
+					rl_log_download_error($_GET['link'] ?? '', 'Insufficient disk space predicted');
+				}
+				html_error('Not enough disk space on server to store this file.');
+			}
+		}
+
+		// Download dedup: if the same link is already being downloaded, wait for
+		// the leader and attach to its file instead of re-downloading (silent
+		// fallback to a normal download on any failure).
+		if (!empty($options['dedup_enabled']) && is_file(CLASS_DIR . 'dedup.php')) {
+			require_once(CLASS_DIR . 'dedup.php');
+			$_dedupLeader = RL_Dedup::findActive($_GET['link']);
+			if (is_array($_dedupLeader) && !empty($_dedupLeader['id'])) {
+				// Capture the CSRF token before releasing the session: the
+				// joiner's completion form still needs it after the wait.
+				$_dedupCsrf = (function_exists('rl_csrf_field') && session_status() === PHP_SESSION_ACTIVE) ? rl_csrf_field() : '';
+				// Release the session before polling so other requests of this
+				// user are not blocked by the session file lock.
+				if (session_status() === PHP_SESSION_ACTIVE) {
+					session_write_close();
+				}
+				$_dedupWait = RL_Dedup::waitForLeader($_dedupLeader['id'], microtime(true) + RL_Dedup::JOIN_TIMEOUT);
+				$_dedupAttach = false;
+				if ($_dedupWait['status'] === 'lost') {
+					// Leader finished (or died): attach if the file is really there.
+					$_dedupAttach = RL_Dedup::attachToLeader($_dedupLeader, $_GET['link']);
+				}
+				if (is_array($_dedupAttach)) {
+					// Serve the leader's file to this user without re-downloading.
+					$_dedupFile = $_dedupAttach['file'];
+					$_dedupSize = $_dedupAttach['size'];
+					echo '<script type="text/javascript">pr(100, \'' . $_dedupSize . '\', \'-\')</script>' . "\r\n";
+					echo sprintf(lang(10), link_for_file($_dedupFile), $_dedupSize, '0s', '-');
+					$file['date'] = time();
+					if (!write_file(CONFIG_DIR . 'files.lst', serialize(array('name' => $_dedupFile, 'size' => $_dedupSize, 'date' => $file['date'], 'link' => $_GET['link'], 'comment' => (!empty($_GET['comment']) ? str_replace(array("\r", "\n"), array('\r', '\n'), $_GET['comment']) : ''), 'owner' => (defined('USER_TOKEN') ? USER_TOKEN : ''))) . "\r\n", 0)) echo lang(9) . '<br />';
+					if (function_exists('rl_log_download_complete')) {
+						rl_log_download_complete(basename($_dedupFile), $_dedupSize, '0s', '-');
+					}
+					echo "\n<form method='POST' name='flist' action='{$_SERVER['SCRIPT_NAME']}'>\n";
+					echo "\t" . $_dedupCsrf . "\n";
+					echo "\t<input type='hidden' name='files[]' value='{$file['date']}' /><br />\n";
+					echo "\t<div style='text-align:center;'>\n";
+					echo renderActions();
+					echo "\t</div>\n";
+					echo "</form>\n";
+					if ($options['new_window']) echo '<br /><a href="javascript:window.close();">' . lang(378) . '</a>';
+					else echo "<br /><a href='{$_SERVER['SCRIPT_NAME']}'>" . lang(13) . "</a>";
+					if (!empty($_GET['audl'])) echo $nn . '<script type="text/javascript">parent.nextlink();</script>';
+					exit;
+				}
+				// Leader failed/timed out/vanished without a usable file:
+				// fall through silently and download normally.
+			}
+		}
+
 		$url = parse_url($_GET['link']);
 		if (empty($url['port'])) $url['port'] = $_GET['port'];
 		// Register download for tracking (use known file size from plugin if provided)

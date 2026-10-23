@@ -3,6 +3,7 @@ function md5_change() {
 	global $list, $PHP_SELF;
 ?>
 <form method="post" action="<?php echo $PHP_SELF; ?>"><input type="hidden" name="act" value="md5_change_go" />
+<?php echo rl_csrf_field(); ?>
 <?php
 	echo lang(count($_GET['files']) > 1 ? 379 : 104).':';
 	foreach ($_GET['files'] as $k => $v) {

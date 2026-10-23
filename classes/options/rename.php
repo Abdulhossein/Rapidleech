@@ -3,6 +3,7 @@ function rl_rename() {
 	global $list, $PHP_SELF;
 ?>
 <form method="post" action="<?php echo $PHP_SELF; ?>"><input type="hidden" name="act" value="rename_go" />
+<?php echo rl_csrf_field(); ?>
 		<table align="center" style="text-align: left;">
 			<tr>
 				<td>

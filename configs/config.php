@@ -5,7 +5,7 @@ $options = array (
   'secretkey' => 'Evp1dftLD0Gm6bXgjtkFSgNTHr7j6qy1JHgtGSJIC4I7ZwsSkJ3pG',
   'download_dir' => 'files/',
   'download_dir_is_changeable' => false,
-  'delete_delay' => 84600,
+  'delete_delay' => 604800,
   'rename_prefix' => '',
   'rename_suffix' => '',
   'rename_underscore' => true,
@@ -32,7 +32,7 @@ $options = array (
   'flist_h_fixed' => false,
   'disable_actions' => false,
   'disable_deleting' => false,
-  'disable_delete' => true,
+  'disable_delete' => false,
   'disable_rename' => false,
   'disable_mass_rename' => true,
   'disable_mass_email' => true,
@@ -109,9 +109,17 @@ $options = array (
   'fgc' => 0,
   'parallel_download' => true,
   'parallel_chunks' => 8,
+  'selfheal_enabled' => true,
+  'selfheal_max_retries' => 2,
+  'selfheal_verify_checksum' => false,
+  'dedup_enabled' => true,
   'admin_user' => 'admin',
   'admin_pass' => 'admin',
   'ytdlp_binary' => false,
+  'local_upload_allowed_types' => 
+  array (
+  ),
+  'local_upload_allow_all' => false,
 );
 
 require_once('site_checker.php');

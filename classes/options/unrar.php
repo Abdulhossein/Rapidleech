@@ -18,6 +18,7 @@ function unrar_setCheckboxes(act, filestounrar) {
 /* ]]> */
 </script>
   <form name="unrar_files" method="post" action="<?php echo $PHP_SELF; ?>">
+  <?php echo rl_csrf_field(); ?>
     <table align="center">
       <tr>
         <td>

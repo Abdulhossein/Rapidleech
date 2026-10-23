@@ -20,7 +20,7 @@ function insert_timer($countd, $caption = '', $timeouttext = '', $hide = false) 
 	$countd = ceil($countd);
 
 	$timerid = jstime();
-	echo "\n<div id='timer_$timerid' style='text-align:center;'>\n\t<br /><span class='caption'>$caption</span>&nbsp;&nbsp;\n\t<span id='timerlabel_$timerid' class='caption'></span>\n</div>\n<script type='text/javascript'>/* <![CDATA[ */\n\tvar count_$timerid = $countd;\n\tfunction timer_$timerid() {\n\t\tif (count_$timerid > 0) {\n\t\t\t$('#timerlabel_$timerid').html('". sprintf(lang(87), "' + count_$timerid + '") . "');\n\t\t\tcount_$timerid--;\n\t\t\tsetTimeout('timer_$timerid()', 1000);\n\t\t}";
+	echo "\n<div id='timer_$timerid' style='text-align:center;'>\n\t<br /><span class='caption'>$caption</span>&nbsp;&nbsp;\n\t<span id='timerlabel_$timerid' class='caption'></span>\n</div>\n<script type='text/javascript'>/* <![CDATA[ */\n\tvar count_$timerid = $countd;\n\tfunction timer_$timerid() {\n\t\tif (count_$timerid > 0) {\n\t\t\t$('#timerlabel_$timerid').html('". sprintf(lang(87), "' + count_$timerid + '") . "');\n\t\t\t	count_$timerid--;\n\t\t\tsetTimeout(timer_$timerid, 1000);\n\t\t}";
 	if ($hide) echo "else $('#timer_$timerid').css('display', 'none');";
 	elseif (!empty($timeouttext)) echo "else $('#timer_$timerid').html('" . addslashes($timeouttext) . "');";
 	echo "\n\t} timer_$timerid();\n/* ]]> */</script>";
@@ -141,7 +141,23 @@ function geturl($host, $port, $url, $referer = 0, $cookie = 0, $post = 0, $saveT
 				$result = parallelDownload($fullUrl, $saveToFile, $resumeInfo['content_length'], $numChunks, $cookieStr, $referer, $proxy, $pauth, $auth);
 
 				if ($result !== false) {
+					if (is_file(CLASS_DIR . 'selfheal.php')) {
+						require_once(CLASS_DIR . 'selfheal.php');
+						RL_SelfHeal::clearFailures(md5($fullUrl));
+					}
 					return $result;
+				}
+				// Self-heal: retry parallel download with backoff before falling back
+				if (is_file(CLASS_DIR . 'selfheal.php')) {
+					require_once(CLASS_DIR . 'selfheal.php');
+					if (RL_SelfHeal::shouldRetry(md5($fullUrl))) {
+						@sleep(min(5, pow(2, RL_SelfHeal::attempts(md5($fullUrl)) - 1)));
+						$result = parallelDownload($fullUrl, $saveToFile, $resumeInfo['content_length'], $numChunks, $cookieStr, $referer, $proxy, $pauth, $auth);
+						if ($result !== false) {
+							RL_SelfHeal::clearFailures(md5($fullUrl));
+							return $result;
+						}
+					}
 				}
 				// If parallel download failed, fall through to single-stream download
 			}
@@ -526,6 +542,10 @@ function geturl($host, $port, $url, $referer = 0, $cookie = 0, $post = 0, $saveT
 		$metaFile = dirname($saveToFile) . '/.' . basename($saveToFile) . '.meta';
 		if (file_exists($metaFile)) {
 			@unlink($metaFile);
+		}
+		if (is_file(CLASS_DIR . 'selfheal.php')) {
+			require_once(CLASS_DIR . 'selfheal.php');
+			RL_SelfHeal::clearFailures(md5($fullUrl));
 		}
 		return array('time' => sec2time(round($time)), 'speed' => @round($bytesTotal / 1024 / (microtime(true) - $timeStart), 2), 'received' => true, 'size' => $fileSize, 'bytesReceived' => ($bytesReceived + $Resume['from']), 'bytesTotal' => ($bytesTotal + $Resume ['from']), 'file' => $saveToFile, 'name' => $FileName);
 	} else {

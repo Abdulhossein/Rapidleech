@@ -3,6 +3,7 @@ function unzip() {
 	global $list, $PHP_SELF;
 ?>
 <form method="post" action="<?php echo $PHP_SELF; ?>">
+<?php echo rl_csrf_field(); ?>
 <input type="hidden" name="act" value="unzip_go" />
 	<table align="center">
 		<tr>

@@ -3,6 +3,7 @@ function zip() {
 	global $list, $options, $PHP_SELF;
 ?>
 <form name="ziplist" method="post" action="<?php echo $PHP_SELF; ?>"><input type="hidden" name="act" value="zip_go" />
+<?php echo rl_csrf_field(); ?>
 	<table cellspacing="5">
 		<tr>
 			<td align="center"><strong>Adding files to a ZIP archive</strong></td>

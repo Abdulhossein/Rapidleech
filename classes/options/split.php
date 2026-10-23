@@ -3,6 +3,7 @@ function rl_split() {
 	global $PHP_SELF, $list, $options;
 ?>
 <form method="post" action="<?php echo $PHP_SELF; ?>">
+<?php echo rl_csrf_field(); ?>
 <input type="hidden" name="act" value="split_go" />
 		<table align="center">
 			<tr>

@@ -15,6 +15,7 @@ function merge() {
 			$usingcrcfile = (substr ( $file ["name"], - 4 ) === '.001') ? false : true;
 ?>
 <form method="post" action="<?php echo $PHP_SELF; ?>"><input type="hidden" name="files[0]" value="<?php echo $_GET ["files"] [0]; ?>" />
+<?php echo rl_csrf_field(); ?>
 <table>
 <?php
 			if ($usingcrcfile) {
