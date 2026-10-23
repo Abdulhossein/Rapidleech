@@ -23,7 +23,7 @@ error_reporting(6135);
 $nn = "\r\n";
 $fromaddr = 'RapidLeech';
 $dev_name = 'Development Stage';
-$rev_num = '56';
+$rev_num = '48';
 $plusrar_v = '4.2';
 $rl_version = '2.5.0';
 $PHP_SELF = $_SERVER['SCRIPT_NAME'];
