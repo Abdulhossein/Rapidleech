@@ -1,6 +1,6 @@
 ### RapidLeech v2.0.2
 
-Build and Edited from https://github.com/Th3-822/rapidleech
+Build and Edited from [PBhadoo/Rapidleech](https://github.com/PBhadoo/Rapidleech)
 
 **Live Server:** [https://hashhackers.apranet.eu.org](https://hashhackers.apranet.eu.org)
 
