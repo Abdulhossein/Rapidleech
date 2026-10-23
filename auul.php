@@ -11,6 +11,8 @@ ignore_user_abort(true);
 
 login_check();
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') rl_csrf_validate();
+
 $id = 1;
 require_once(HOST_DIR.'download/hosts.php');
 require_once(CLASS_DIR.'http.php');
@@ -176,6 +178,7 @@ unset($Path);
 
 <div class="rl-container">
 	<form name="flist" method="post" action="auul.php?action=upload">
+		<?php echo rl_csrf_field(); ?>
 		<div class="rl-card" style="margin-bottom: 24px;">
 			<div class="rl-card-header">
 				<div class="rl-card-icon">

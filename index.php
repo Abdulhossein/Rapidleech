@@ -14,6 +14,7 @@ purge_files($options['delete_delay']);
 register_shutdown_function('pause_download');
 
 $_REQUEST = $_GET = array_merge($_GET, $_POST);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') rl_csrf_validate();
 $_REQUEST['premium_acc'] = $_POST['premium_acc'] = $_GET['premium_acc'] = isset($_REQUEST['premium_acc']) && $_REQUEST['premium_acc'] == 'on' ? 'on' : false;
 $_REQUEST['cookieuse'] = $_POST['cookieuse'] = $_GET['cookieuse'] = isset($_REQUEST['cookieuse']) && $_REQUEST['cookieuse'] == 'on' ? 'on' : false;
 
@@ -363,6 +364,7 @@ if (empty($_GET['filename']) || empty($_GET['host']) || empty($_GET['path'])) {
 			} else echo lang(12) . '<br />';
 		}
 		echo "\n<form method='POST' name='flist' action='{$_SERVER['SCRIPT_NAME']}'>\n";
+		echo "\t" . rl_csrf_field() . "\n";
 		echo "\t<input type='hidden' name='files[]' value='{$file['date']}' /><br />\n";
 		echo "\t<div style='text-align:center;'>\n";
 		echo renderActions();

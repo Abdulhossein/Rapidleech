@@ -452,6 +452,7 @@ class ytdlp_universal extends DownloadClass {
 		echo '</table>';
 
 		echo "\n<form method='POST' name='flist' action='{$_SERVER['SCRIPT_NAME']}'>\n";
+		if (function_exists('rl_csrf_field')) echo rl_csrf_field();
 		echo "\t<input type='hidden' name='files[]' value='" . $fileRecord['date'] . "' /><br />\n";
 		echo "\t<div style='text-align:center;'>\n";
 		if (function_exists('renderActions')) echo renderActions();

@@ -2,6 +2,8 @@
 require_once('rl_init.php');
 ignore_user_abort(true);
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') rl_csrf_validate();
+
 if (!is__writable(DOWNLOAD_DIR)) {
     http_response_code(500);
     echo json_encode(['status'=>'error','message'=>'Download directory not writable']);

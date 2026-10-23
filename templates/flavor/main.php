@@ -103,6 +103,7 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
         <!-- Tab 1: Transload -->
         <div id="tb_content">
             <form action="<?php echo $PHP_SELF; ?>" name="transload" method="post"<?php if ($options['new_window']) echo ' target="_blank"'; ?>>
+                <?php echo rl_csrf_field(); ?>
                 <div class="tab-content" id="tb1">
                     <div style="display:grid;gap:20px;">
                         <div class="rl-form-group">
@@ -248,6 +249,7 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
                 </div>
 
                 <form action="<?php echo $PHP_SELF; ?>" name="flist" method="post">
+                    <?php echo rl_csrf_field(); ?>
                     <div style="margin-bottom:14px;"><?php echo renderActions(); ?></div>
                     <div style="overflow-x:auto;border-radius:var(--fl-r);border:1px solid var(--fl-border);">
                         <?php if ($options['flist_h_fixed']) { ?>
@@ -320,7 +322,14 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
                 <div style="display:grid;gap:20px;">
                     <div class="rl-form-group">
                         <label class="fl-label" for="localfile">Select file to upload</label>
-                        <input type="file" id="localfile" name="localfile">
+                        <div id="dropZone" class="fl-dropzone">
+                            <div class="fl-dropzone-icon">
+                                <svg width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+                            </div>
+                            <div class="fl-dropzone-hint"><strong>Drag &amp; drop your file here</strong><br>or choose it below</div>
+                            <input type="file" id="localfile" name="localfile">
+                            <div id="dropFileName" class="fl-dropzone-file"></div>
+                        </div>
                     </div>
                     <div>
                         <button type="button" onclick="uploadLocalFile();" class="fl-btn fl-btn-primary fl-btn-block">Upload Local File</button>
@@ -349,6 +358,35 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
 
             <script type="text/javascript">
             /* <![CDATA[ */
+            (function(){
+                var dropZone = document.getElementById('dropZone');
+                var fileInput = document.getElementById('localfile');
+                var fileNameBox = document.getElementById('dropFileName');
+                if(!dropZone || !fileInput) return;
+                var dragDepth = 0;
+                ['dragenter','dragover'].forEach(function(ev){
+                    dropZone.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); if(ev==='dragenter') dragDepth++; dropZone.classList.add('fl-dropzone-over'); });
+                });
+                ['dragleave','dragend'].forEach(function(ev){
+                    dropZone.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); dragDepth = Math.max(0, dragDepth-1); if(dragDepth===0) dropZone.classList.remove('fl-dropzone-over'); });
+                });
+                dropZone.addEventListener('drop', function(e){
+                    e.preventDefault(); e.stopPropagation();
+                    dragDepth = 0; dropZone.classList.remove('fl-dropzone-over');
+                    var files = e.dataTransfer && e.dataTransfer.files;
+                    if(files && files.length > 0){
+                        try { fileInput.files = files; } catch(err) {}
+                        showFileName(files[0]);
+                    }
+                });
+                fileInput.addEventListener('change', function(){ if(fileInput.files && fileInput.files.length) showFileName(fileInput.files[0]); });
+                function showFileName(f){
+                    if(!fileNameBox) return;
+                    var size = f.size > 1048576 ? (f.size/1048576).toFixed(2)+' MB' : (f.size/1024).toFixed(1)+' KB';
+                    fileNameBox.textContent = '📄 ' + f.name + ' (' + size + ')';
+                    fileNameBox.style.display = 'block';
+                }
+            })();
             function uploadLocalFile(){
                 var fileInput = document.getElementById('localfile');
                 var progress = document.getElementById('uploadProgress');
@@ -364,6 +402,7 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
                 errorBox.style.display = 'none';
                 progress.value = 0;
                 var formData = new FormData();
+                formData.append('rl_csrf', '<?php echo rl_csrf_token(); ?>');
                 formData.append('localfile', fileInput.files[0]);
                 var xhr = new XMLHttpRequest();
                 xhr.upload.addEventListener('progress', function(e){

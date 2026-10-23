@@ -114,6 +114,95 @@ function admin_dl_dir($rootDir, $options) {
     return rtrim($dir, '/') . '/';
 }
 
+// Settings form schema: group => key => [label, type, hint, select-options]
+// type: bool | text | num | list (one item per line) | users (user:pass per line) | select | ytdlp (empty = false)
+function admin_settings_schema() {
+    global $rootDir;
+    $templates = array();
+    foreach (glob($rootDir . '/templates/*', GLOB_ONLYDIR) ?: array() as $t) $templates[] = basename($t);
+    if (!$templates) $templates = array('flavor', 'plugmod');
+    $langs = array();
+    foreach (glob($rootDir . '/languages/*.php') ?: array() as $l) {
+        $b = basename($l, '.php');
+        if ($b !== 'index' && $b !== '' && !in_array($b, $langs)) $langs[] = $b;
+    }
+    if (!$langs) $langs = array('en');
+    return array(
+        'General' => array(
+            'download_dir' => array('Download directory', 'text', 'Relative to RapidLeech root, e.g. files/'),
+            'download_dir_is_changeable' => array('Users may change download dir', 'bool', ''),
+            'delete_delay' => array('Auto-delete delay (seconds)', 'num', 'Files are removed after this time (84600 ≈ 23.5 h)'),
+            'file_size_limit' => array('Max file size (KB)', 'num', 'Transloads larger than this are rejected'),
+            'rename_prefix' => array('Filename prefix', 'text', ''),
+            'rename_suffix' => array('Filename suffix', 'text', ''),
+            'rename_underscore' => array('Replace spaces with underscores', 'bool', ''),
+            'bw_save' => array('Bandwidth saving mode', 'bool', ''),
+        ),
+        'Access & Security' => array(
+            'login' => array('Require site login', 'bool', 'Ask users for the credentials below'),
+            'users' => array('Site users (user:password per line)', 'users', 'Used when site login is enabled'),
+            'admin_user' => array('Admin username', 'text', 'Admin panel login'),
+            'admin_pass' => array('Admin password', 'text', 'Change takes effect immediately'),
+            'show_all' => array('Show all users\' files to everyone', 'bool', ''),
+        ),
+        'Downloads' => array(
+            'auto_download_disable' => array('Disable auto-download', 'bool', ''),
+            'auto_upload_disable' => array('Disable auto-upload', 'bool', ''),
+            'use_curl' => array('Use cURL', 'bool', ''),
+            'redir' => array('Follow redirects', 'bool', ''),
+            'no_cache' => array('Send no-cache headers', 'bool', ''),
+            'ref_check' => array('Check referer', 'bool', ''),
+            '2gb_fix' => array('2GB+ file fix', 'bool', ''),
+            'require_content_length' => array('Require Content-Length', 'bool', ''),
+            'fgc' => array('file_get_contents mode', 'num', '0 = off'),
+            'parallel_download' => array('Parallel chunked downloads', 'bool', ''),
+            'parallel_chunks' => array('Chunks per download', 'num', '1-16 recommended'),
+            'ytdlp_binary' => array('yt-dlp binary path', 'ytdlp', 'Empty = auto-detect'),
+        ),
+        'Interface' => array(
+            'template_used' => array('Template', 'select', '', $templates),
+            'default_language' => array('Default language', 'select', '', $langs),
+            'server_info' => array('Show server info panel', 'bool', ''),
+            'ajax_refresh' => array('Live AJAX stats refresh', 'bool', ''),
+            'new_window' => array('Open downloads in new window', 'bool', ''),
+            'new_window_js' => array('New window via JavaScript', 'bool', ''),
+            'flist_sort' => array('Sortable file list', 'bool', ''),
+            'flist_h_fixed' => array('Fixed file list height', 'bool', ''),
+            'notes_disable' => array('Disable file notes', 'bool', ''),
+            'upload_html_disable' => array('Disable upload HTML', 'bool', ''),
+            'myuploads_disable' => array('Disable "My uploads"', 'bool', ''),
+        ),
+        'File Actions' => array(
+            'disable_actions' => array('Disable all file actions', 'bool', ''),
+            'disable_deleting' => array('Disable deleting (master)', 'bool', ''),
+            'disable_delete' => array('Disable delete button', 'bool', ''),
+            'disable_rename' => array('Disable rename', 'bool', ''),
+            'disable_mass_rename' => array('Disable mass rename', 'bool', ''),
+            'disable_mass_email' => array('Disable mass email', 'bool', ''),
+            'disable_email' => array('Disable email files', 'bool', ''),
+            'disable_ftp' => array('Disable FTP transfer', 'bool', ''),
+            'disable_upload' => array('Disable uploading', 'bool', ''),
+            'disable_merge' => array('Disable merge', 'bool', ''),
+            'disable_split' => array('Disable split', 'bool', ''),
+            'disable_archive_compression' => array('Disable archive compression', 'bool', ''),
+            'disable_tar' => array('Disable TAR', 'bool', ''),
+            'disable_zip' => array('Disable ZIP', 'bool', ''),
+            'disable_unzip' => array('Disable Unzip', 'bool', ''),
+            'disable_rar' => array('Disable RAR', 'bool', ''),
+            'disable_unrar' => array('Disable UnRAR', 'bool', ''),
+            'disable_hashing' => array('Disable hashing', 'bool', ''),
+            'disable_md5_change' => array('Disable MD5 change', 'bool', ''),
+            'disable_list' => array('Disable file listing', 'bool', ''),
+        ),
+        'Upload Security' => array(
+            'forbidden_filetypes' => array('Forbidden file types (one per line)', 'list', 'Uploads with these extensions are blocked'),
+            'forbidden_filetypes_block' => array('Block forbidden types', 'bool', 'Off = rename instead of block'),
+            'rename_these_filetypes_to' => array('Rename blocked types to', 'text', ''),
+            'check_these_before_unzipping' => array('Check forbidden types inside archives', 'bool', ''),
+        ),
+    );
+}
+
 // AJAX: get active downloads + mega lock status
 if (isset($_GET['get_pending'])) {
     header('Content-Type: application/json');
@@ -281,6 +370,15 @@ if (isset($_GET['kill_pid'])) {
 $message = '';
 $messageType = '';
 
+// CSRF protection: token derived from admin credentials (attacker can't forge it without knowing them)
+$adminCsrf = hash_hmac('sha256', 'rl-admin-csrf', $ADMIN_USER . ':' . $ADMIN_PASS);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (empty($_POST['csrf_token']) || !hash_equals($adminCsrf, $_POST['csrf_token'])) {
+        http_response_code(403);
+        die('Invalid CSRF token');
+    }
+}
+
 // Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -326,6 +424,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             break;
 
         case 'save_config':
+            $opts = $options; // $options already loaded at bootstrap; config.php has no return statement
+            $schema = admin_settings_schema();
+            $new = $opts; // preserve keys not present in the form (secretkey, etc.)
+            foreach ($schema as $group) {
+                foreach ($group as $key => $def) {
+                    $type = $def[1];
+                    // Field absent from POST (e.g. collapsed group) = keep current value
+                    if (!array_key_exists('cfg_' . $key, $_POST)) continue;
+                    if ($type === 'bool') {
+                        $new[$key] = !empty($_POST['cfg_' . $key]);
+                    } elseif ($type === 'num') {
+                        $raw = trim($_POST['cfg_' . $key] ?? '');
+                        if ($raw === '') continue; // empty = keep current
+                        $new[$key] = is_numeric($raw) ? $raw + 0 : $opts[$key];
+                    } elseif ($type === 'list') {
+                        $new[$key] = array_values(array_filter(array_map('trim', explode("\n", (string)($_POST['cfg_' . $key] ?? ''))), 'strlen'));
+                    } elseif ($type === 'users') {
+                        $users = array();
+                        foreach (explode("\n", (string)($_POST['cfg_' . $key] ?? '')) as $line) {
+                            $line = trim($line);
+                            if ($line === '' || strpos($line, ':') === false) continue;
+                            list($u, $p) = explode(':', $line, 2);
+                            $u = trim($u); $p = trim($p);
+                            if ($u !== '') $users[$u] = $p;
+                        }
+                        $new[$key] = $users;
+                    } elseif ($type === 'ytdlp') {
+                        $raw = trim($_POST['cfg_' . $key] ?? '');
+                        $new[$key] = ($raw === '') ? false : $raw;
+                    } else { // text / select
+                        $new[$key] = trim($_POST['cfg_' . $key] ?? '');
+                    }
+                }
+            }
+            // Validate critical values
+            if (!is_dir($rootDir . '/' . trim($new['download_dir'], '/\\'))) {
+                $message = 'Download directory does not exist: ' . htmlspecialchars($new['download_dir']);
+                $messageType = 'error';
+                break;
+            }
+            if (trim($new['admin_user']) === '' || trim($new['admin_pass']) === '') {
+                $message = 'Admin username and password cannot be empty.';
+                $messageType = 'error';
+                break;
+            }
+            if ((int)$new['file_size_limit'] < 1) {
+                $message = 'Max file size must be at least 1 KB.';
+                $messageType = 'error';
+                break;
+            }
+            if ((int)$new['delete_delay'] < 0) {
+                $message = 'Auto-delete delay cannot be negative.';
+                $messageType = 'error';
+            }
+            if ($messageType === 'error') break;
+            // Write config.php: guard + var_export + requires (always valid PHP)
+            $code = "<?php\nif (!defined('RAPIDLEECH')) { exit('<a href=\"http://www.rapidleech.com\">RapidLeech</a>: Access denied'); }\n\n"
+                  . "\$options = " . var_export($new, true) . ";\n\n"
+                  . "require_once('site_checker.php');\n"
+                  . "require_once('accounts.php');\n"
+                  . "\$secretkey =& \$options['secretkey'];\n";
+            if (@file_put_contents($configFile, $code, LOCK_EX) === false) {
+                $message = 'Failed to write config.php. Check permissions.';
+                $messageType = 'error';
+                break;
+            }
+            rl_log_admin('Save config', 'Settings form saved (' . count($new) . ' options)');
+            $message = 'Configuration saved successfully. Reload the page to apply changes.';
+            $messageType = 'success';
+            break;
+
+        case 'save_config_raw':
             $content = $_POST['config_content'] ?? '';
             // Guard: block content that injects PHP execution tags
             if (preg_match('/<\?(?!xml\s)/i', $content) || stripos($content, '<%') !== false) {
@@ -334,8 +504,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
             }
             if (@file_put_contents($configFile, $content)) {
-                rl_log_admin('Save config', 'Configuration updated');
-                $message = 'Configuration saved successfully. Reload the page to apply changes.';
+                rl_log_admin('Save config raw', 'Raw config.php updated');
+                $message = 'Raw configuration saved successfully. Reload the page to apply changes.';
                 $messageType = 'success';
             } else {
                 $message = 'Failed to save config file. Check permissions.';
@@ -561,6 +731,20 @@ label.check input{accent-color:#6366f1}
 .tag-green{background:rgba(16,185,129,.15);color:#10b981}
 .tag-yellow{background:rgba(245,158,11,.15);color:#f59e0b}
 .tag-red{background:rgba(239,68,68,.15);color:#ef4444}
+.cfg-group{border:1px solid #282d3e;border-radius:12px;margin-bottom:12px;overflow:hidden}
+.cfg-group-head{width:100%;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#1e2231;border:0;color:#e8ecf4;font:600 14px/1 inherit;cursor:pointer}
+.cfg-group-head:hover{background:#272c3e}
+.cfg-caret{color:#606880}
+.cfg-group-body{padding:6px 16px 14px}
+.cfg-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:10px 0;border-bottom:1px solid #1e2231;align-items:center}
+.cfg-row:last-child{border-bottom:0}
+.cfg-label label{font-size:13px;font-weight:600;color:#e8ecf4}
+.cfg-hint{font-size:11px;color:#606880;margin-top:2px}
+.cfg-input input[type="text"],.cfg-input select{width:100%;padding:8px 12px;font:13px inherit;background:#0c0e16;color:#e8ecf4;border:1.5px solid #282d3e;border-radius:8px;outline:none}
+.cfg-input input[type="text"]:focus,.cfg-input select:focus{border-color:#6366f1}
+.cfg-input textarea.cfg-list{width:100%;padding:8px 12px;font:12px/1.5 'Consolas','Monaco',monospace;background:#0c0e16;color:#e8ecf4;border:1.5px solid #282d3e;border-radius:8px;resize:vertical;outline:none}
+.cfg-input textarea.cfg-list:focus{border-color:#6366f1}
+@media (max-width:640px){.cfg-row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -630,6 +814,7 @@ label.check input{accent-color:#6366f1}
         <h2>🗑️ Clear All Downloads</h2>
         <h3>Delete all files in the downloads folder and clear files.lst. This removes ALL users' files.</h3>
         <form method="POST" onsubmit="return confirm('Are you sure? This will delete ALL downloaded files.');">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="clear_files">
             <button type="submit" class="btn btn-danger">🗑️ Clear All Files (<?php echo $fileCount; ?> files, <?php echo formatBytes($totalSize); ?>)</button>
         </form>
@@ -638,13 +823,73 @@ label.check input{accent-color:#6366f1}
     <!-- Configuration -->
     <div class="card">
         <h2>⚙️ Configuration</h2>
-        <h3>Edit configs/config.php — admin credentials, file size limits, forbidden types, and more</h3>
+        <h3>All settings from configs/config.php — changes apply after saving</h3>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="save_config">
-            <textarea name="config_content" rows="25"><?php echo htmlspecialchars($configContent); ?></textarea>
-            <br><br>
+            <?php
+            $schema = admin_settings_schema();
+            foreach ($schema as $group => $fields):
+                $gid = 'grp_' . preg_replace('/[^a-z0-9]/i', '', $group);
+            ?>
+            <div class="cfg-group">
+                <button type="button" class="cfg-group-head" onclick="var b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none'">
+                    <span><?php echo htmlspecialchars($group); ?></span><span class="cfg-caret">▾</span>
+                </button>
+                <div class="cfg-group-body" style="display:none">
+                <?php foreach ($fields as $key => $def):
+                    list($label, $type, $hint) = $def;
+                    $cur = isset($options[$key]) ? $options[$key] : null;
+                    $name = 'cfg_' . $key;
+                ?>
+                    <div class="cfg-row">
+                        <div class="cfg-label">
+                            <label for="<?php echo $name; ?>"><?php echo htmlspecialchars($label); ?></label>
+                            <?php if ($hint): ?><div class="cfg-hint"><?php echo htmlspecialchars($hint); ?></div><?php endif; ?>
+                        </div>
+                        <div class="cfg-input">
+                        <?php if ($type === 'bool'): ?>
+                            <label class="check"><input type="checkbox" id="<?php echo $name; ?>" name="<?php echo $name; ?>" value="1"<?php echo $cur ? ' checked' : ''; ?>> Enabled</label>
+                        <?php elseif ($type === 'num'): ?>
+                            <input type="text" inputmode="numeric" id="<?php echo $name; ?>" name="<?php echo $name; ?>" value="<?php echo htmlspecialchars((string)$cur); ?>">
+                        <?php elseif ($type === 'select'): ?>
+                            <select id="<?php echo $name; ?>" name="<?php echo $name; ?>">
+                                <?php foreach ($def[3] as $opt): ?>
+                                <option value="<?php echo htmlspecialchars($opt); ?>"<?php echo (string)$cur === (string)$opt ? ' selected' : ''; ?>><?php echo htmlspecialchars($opt); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php elseif ($type === 'list'): ?>
+                            <textarea name="<?php echo $name; ?>" rows="4" class="cfg-list"><?php echo htmlspecialchars(implode("\n", (array)$cur)); ?></textarea>
+                        <?php elseif ($type === 'users'): ?>
+                            <textarea name="<?php echo $name; ?>" rows="3" class="cfg-list"><?php
+                                $ul = array();
+                                foreach ((array)$cur as $u => $p) $ul[] = $u . ':' . $p;
+                                echo htmlspecialchars(implode("\n", $ul)); ?></textarea>
+                        <?php elseif ($type === 'ytdlp'): ?>
+                            <input type="text" id="<?php echo $name; ?>" name="<?php echo $name; ?>" value="<?php echo $cur ? htmlspecialchars((string)$cur) : ''; ?>" placeholder="auto-detect">
+                        <?php else: ?>
+                            <input type="text" id="<?php echo $name; ?>" name="<?php echo $name; ?>" value="<?php echo htmlspecialchars((string)$cur); ?>">
+                        <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            <br>
             <button type="submit" class="btn btn-primary">💾 Save Configuration</button>
+            <span style="font-size:12px;color:#606880;margin-left:10px">Keys not shown here (e.g. secretkey) are preserved untouched.</span>
         </form>
+        <details style="margin-top:16px">
+            <summary style="cursor:pointer;color:#818cf8;font-size:13px">Advanced: edit raw config.php</summary>
+            <form method="POST" style="margin-top:12px" onsubmit="return confirm('Raw editing can break the site if the PHP is invalid. Continue?');">
+                <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
+                <input type="hidden" name="action" value="save_config_raw">
+                <textarea name="config_content" rows="25"><?php echo htmlspecialchars($configContent); ?></textarea>
+                <br><br>
+                <button type="submit" class="btn btn-danger">💾 Save Raw config.php</button>
+            </form>
+        </details>
     </div>
 
     <!-- Premium Accounts -->
@@ -652,6 +897,7 @@ label.check input{accent-color:#6366f1}
         <h2>🔑 Premium Accounts</h2>
         <h3>Edit configs/accounts.php directly</h3>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="save_accounts">
             <textarea name="accounts_content" rows="20"><?php echo htmlspecialchars($accountsContent); ?></textarea>
             <br><br>
@@ -674,6 +920,7 @@ label.check input{accent-color:#6366f1}
             </div>
         </div>
         <form method="POST" onsubmit="return confirm('This will download and install the latest RAR from rarlab.com.');">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="update_rar">
             <button type="submit" class="btn btn-primary">📦 Update RAR to Latest</button>
         </form>
@@ -711,6 +958,7 @@ label.check input{accent-color:#6366f1}
             <?php endif; ?>
         </div>
         <form method="POST" onsubmit="return confirm('This will download the latest yt-dlp binary from GitHub.');">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="update_ytdlp">
             <button type="submit" class="btn btn-primary">📹 <?php echo ($ytdlpInfo['version'] === 'Not installed') ? 'Install' : 'Update'; ?> yt-dlp</button>
         </form>
@@ -730,6 +978,7 @@ label.check input{accent-color:#6366f1}
             </div>
             <?php if (!$hasDeno): ?>
             <form method="POST" onsubmit="return confirm('This will install Deno JavaScript runtime from deno.land');" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
                 <input type="hidden" name="action" value="install_deno">
                 <button type="submit" class="btn btn-warning" style="font-size:13px;padding:8px 16px">⚡ Install Deno</button>
             </form>
@@ -765,6 +1014,7 @@ label.check input{accent-color:#6366f1}
                 <span class="tag <?php echo $hasCookies ? 'tag-green' : 'tag-yellow'; ?>"><?php echo $hasCookies ? 'Cookies loaded (' . strlen($ytdlpCookiesContent) . ' bytes)' : 'No cookies set'; ?></span>
             </div>
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
                 <input type="hidden" name="action" value="save_ytdlp_cookies">
                 <textarea name="ytdlp_cookies_content" rows="8" placeholder="# Netscape HTTP Cookie File&#10;# Paste your exported cookies.txt content here...&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;0&#9;cookie_name&#9;cookie_value"><?php echo htmlspecialchars($ytdlpCookiesContent); ?></textarea>
                 <br><br>
@@ -783,6 +1033,7 @@ label.check input{accent-color:#6366f1}
         <h2>🔄 Update from GitHub</h2>
         <h3>Pulls latest code from a GitHub repo.</h3>
         <form method="POST" onsubmit="return confirm(document.getElementById('full_reset').checked ? 'FULL RESET: This will OVERWRITE config.php and accounts.php with repo defaults!' : 'This will update code. Your accounts and config will be preserved.');">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="git_update">
             <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px">
                 <div>
@@ -811,6 +1062,7 @@ label.check input{accent-color:#6366f1}
         <h2>⚡ Run Shell Command</h2>
         <h3>Execute a command on the server (runs from RapidLeech root directory)</h3>
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
             <input type="hidden" name="action" value="run_command">
             <div class="flex" style="margin-bottom:12px">
                 <input type="text" name="command" placeholder="ls -la files/" value="<?php echo htmlspecialchars($_POST['command'] ?? ''); ?>" style="flex:1">
@@ -903,6 +1155,7 @@ label.check input{accent-color:#6366f1}
         <div style="margin-top:16px;display:flex;justify-content:space-between;align-items:center">
             <span style="color:#606880;font-size:12px"><?php echo count($logEntries); ?> entries shown (max 200)</span>
             <form method="POST" onsubmit="return confirm('Clear all activity logs?');" style="display:inline">
+                <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
                 <input type="hidden" name="action" value="clear_logs">
                 <button type="submit" class="btn btn-danger" style="padding:6px 14px;font-size:12px">🗑️ Clear Logs</button>
             </form>
@@ -910,7 +1163,7 @@ label.check input{accent-color:#6366f1}
     </div>
 
     <div style="text-align:center;padding:20px;color:#606880;font-size:12px">
-        <a href="https://github.com/Abdulhossein/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;font-weight:700;">RapidLeech</a> v2.0.2 • Admin Panel • PHP <?php echo PHP_VERSION; ?> • <?php echo PHP_OS; ?>
+        <a href="https://github.com/Abdulhossein/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;font-weight:700;">RapidLeech</a> v2.5.0 • Admin Panel • PHP <?php echo PHP_VERSION; ?> • <?php echo PHP_OS; ?>
         <br>&copy; <?php echo date('Y'); ?> <a href="https://github.com/Abdulhossein/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;">Abdulhossein</a>. All rights reserved.
     </div>
 </div>

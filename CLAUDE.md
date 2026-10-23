@@ -1,4 +1,4 @@
-# CLAUDE.md — RapidLeech v2.0.2
+# CLAUDE.md — RapidLeech v2.5.0
 
 Context file for Claude Code. This document describes the project, architecture, conventions, and guidance for working on this codebase.
 
@@ -10,7 +10,7 @@ Context file for Claude Code. This document describes the project, architecture,
 
 - **Live server:** https://hashhackers.apranet.eu.org
 - **GitHub:** https://github.com/Abdulhossein/Rapidleech
-- **Version:** 2.0.2 (rev 43)
+- **Version:** 2.5.0 (rev 48)
 
 ---
 
@@ -190,6 +190,7 @@ $premium_acc["mega_co_nz"] = ['user' => 'email', 'pass' => 'pass'];
 
 - `.htaccess` blocks direct PHP access except whitelisted entry points
 - Admin panel uses HTTP Basic Auth (`admin_user`/`admin_pass` in config)
+- Admin Configuration card provides a schema-driven settings form (all config keys editable in the UI); a raw editor is kept as a fallback
 - **Default credentials are `admin/admin` — must be changed in production**
 - Credentials stored with Blowfish encryption (key in `secretkey`)
 - Cookie token is HttpOnly but **not Secure** (no HTTPS enforcement in code)
@@ -259,7 +260,7 @@ Templates are in `templates/{name}/`. Each has: `header.php`, `main.php`, `trans
 | `DOWNLOAD_DIR` | Value of `$options['download_dir']` |
 | `TEMPLATE_DIR` | `'templates/{template_used}/'` |
 | `USER_TOKEN` | 32-char hex token for current user |
-| `RL_VERSION` | `'2.0.2'` |
+| `RL_VERSION` | `'2.5.0'` |
 
 ---
 

@@ -548,6 +548,7 @@ function host_matches($site, $host) {
 
 function GetDefaultParams() {
 	$DParam = array();
+	if (function_exists('rl_csrf_token')) $DParam['rl_csrf'] = rl_csrf_token();
 	if (!empty($_GET['useproxy']) && !empty($_GET['proxy'])) {
 		$DParam['useproxy'] = 'on';
 		$DParam['proxy'] = $_GET['proxy'];

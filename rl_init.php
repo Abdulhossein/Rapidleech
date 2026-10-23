@@ -20,9 +20,9 @@ error_reporting(6135);
 $nn = "\r\n";
 $fromaddr = 'RapidLeech';
 $dev_name = 'Development Stage';
-$rev_num = '43';
+$rev_num = '48';
 $plusrar_v = '4.2';
-$rl_version = '2.0.2';
+$rl_version = '2.5.0';
 $PHP_SELF = $_SERVER['SCRIPT_NAME'];
 define('RAPIDLEECH', 'yes');
 define('ROOT_DIR', realpath('./'));
@@ -30,9 +30,9 @@ define('PATH_SPLITTER', ((strpos(ROOT_DIR, '\\') !== false) ? '\\' : '/'));
 define('HOST_DIR', 'hosts/');
 define('CLASS_DIR', 'classes/');
 define('CONFIG_DIR', 'configs/');
-define('BUILD', '30May2011');
+define('BUILD', '23Oct2026');
 define('RL_VERSION', $rl_version);
-define('CREDITS', '<a href="https://github.com/Abdulhossein/Rapidleech" class="rl-link"><b>RapidLeech</b></a> <b class="rev-dev">v' . $rl_version . '</b>&nbsp;<b class="rev-dev">PlugMod (eqbal) rev. ' . $rev_num . '</b> <span class="rev-dev">' . $dev_name . '</span><br><a href="https://hits.seeyoufarm.com"><img src="https://hits.sh/rapidleech.hashhackers.com.svg?view=today-total&style=for-the-badge&label=Visitors&color=0d1117&labelColor=00aaff"/></a><br><small class="small-credits">For DMCA contact dmca@hashhackers.com, please allow 48 hours to process DMCA requests.</small>');
+define('CREDITS', '<a href="https://github.com/Abdulhossein/Rapidleech" class="rl-link"><b>RapidLeech</b></a> <b class="rev-dev">v' . $rl_version . '</b>&nbsp;<b class="rev-dev">PlugMod (eqbal) rev. ' . $rev_num . '</b> <span class="rev-dev">' . $dev_name . '</span><br><img src="ajax.php?ajax=visitor_badge" alt="Visitors: today / total" height="28"/><br><small class="small-credits">For DMCA contact dmca@hashhackers.com, please allow 48 hours to process DMCA requests.</small>');
 
 require_once(CONFIG_DIR . 'setup.php');
 
@@ -54,6 +54,37 @@ header('Pragma: no-cache');
 
 require_once(CLASS_DIR . 'other.php');
 require_once(CLASS_DIR . 'logger.php');
+
+// ============================================
+// SESSION & CSRF PROTECTION
+// One session per browser; a per-session token
+// required by every state-changing POST request.
+// ============================================
+if (session_status() === PHP_SESSION_NONE && PHP_SAPI !== 'cli') {
+	session_name('rl_session');
+	@session_start();
+}
+
+function rl_csrf_token() {
+	if (session_status() !== PHP_SESSION_ACTIVE) return '';
+	if (empty($_SESSION['rl_csrf']) || !is_string($_SESSION['rl_csrf']) || !preg_match('/^[a-f0-9]{32}$/', $_SESSION['rl_csrf'])) {
+		$_SESSION['rl_csrf'] = bin2hex(random_bytes(16));
+	}
+	return $_SESSION['rl_csrf'];
+}
+
+function rl_csrf_field() {
+	return '<input type="hidden" name="rl_csrf" value="' . rl_csrf_token() . '" />';
+}
+
+function rl_csrf_validate() {
+	$sent = '';
+	if (!empty($_POST['rl_csrf']) && is_string($_POST['rl_csrf'])) $sent = $_POST['rl_csrf'];
+	elseif (!empty($_SERVER['HTTP_X_RL_CSRF']) && is_string($_SERVER['HTTP_X_RL_CSRF'])) $sent = $_SERVER['HTTP_X_RL_CSRF'];
+	$valid = ($sent !== '' && rl_csrf_token() !== '' && hash_equals(rl_csrf_token(), $sent));
+	if (!$valid) html_error('Invalid or missing security token. Please go back and try again.');
+	return true;
+}
 
 // ============================================
 // USER TOKEN: Cookie-based file ownership
@@ -78,6 +109,41 @@ function get_user_token() {
 }
 // Initialize the user token on every request
 define('USER_TOKEN', get_user_token());
+
+// ============================================
+// VISITOR COUNTER: self-hosted badge stats
+// Counts main-page loads; unique visitors per day
+// are tracked by user token in configs/visits.json.
+// ============================================
+function rl_count_visit() {
+	if (PHP_SAPI === 'cli') return;
+	$script = isset($_SERVER['SCRIPT_NAME']) ? $_SERVER['SCRIPT_NAME'] : '';
+	if (!preg_match('/index\.php$/', $script)) return;
+	$file = CONFIG_DIR . 'visits.json';
+	$today = date('Y-m-d');
+	$fp = @fopen($file, 'c+');
+	if (!$fp) return;
+	@flock($fp, LOCK_EX);
+	$data = json_decode((string)@stream_get_contents($fp), true);
+	if (!is_array($data) || !isset($data['total'])) $data = array('date' => $today, 'today' => 0, 'total' => 0, 'tokens' => array());
+	if (empty($data['date']) || $data['date'] !== $today) {
+		$data['date'] = $today;
+		$data['today'] = 0;
+		$data['tokens'] = array();
+	}
+	$data['total']++;
+	$token = defined('USER_TOKEN') ? USER_TOKEN : '';
+	if ($token !== '' && !in_array($token, $data['tokens'], true)) {
+		$data['tokens'][] = $token;
+		$data['today']++;
+	}
+	rewind($fp);
+	ftruncate($fp, 0);
+	@fwrite($fp, json_encode($data));
+	@flock($fp, LOCK_UN);
+	fclose($fp);
+}
+rl_count_visit();
 
 // ============================================
 // FAILSAFE: Auto-cleanup when storage hits 99%

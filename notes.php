@@ -17,6 +17,7 @@ include(TEMPLATE_DIR.'header.php'); ?>
 		fclose($temp);
 	}
 	if (isset($_POST['notes']) && $_POST['notes']) {
+		rl_csrf_validate();
 		file_put_contents(DOWNLOAD_DIR.basename(lang(327)).'.txt', $_POST['notes']);
 ?>
 	<p><?php echo lang(325); ?></p>
@@ -26,6 +27,7 @@ include(TEMPLATE_DIR.'header.php'); ?>
 ?>
 <div align="center">
 <form method="post" action="<?php echo $PHP_SELF;?>">
+<?php echo rl_csrf_field(); ?>
 <textarea class="notes" name="notes" rows="1" cols="1"><?php echo htmlentities($content); ?></textarea>
 <br /><input type="submit" name="submit" value="<?php echo lang(326); ?>" />
 </form>

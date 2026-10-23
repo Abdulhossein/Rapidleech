@@ -87,22 +87,73 @@ function ZahlenFormatieren($Wert) {
 	
 	return $Wert;
 }
+function fl_cpu_bar_html($pct) {
+	$pct = max(0, min(100, (float)$pct));
+	$cls = $pct >= 85 ? 'fl-cpu-high' : ($pct >= 60 ? 'fl-cpu-warn' : 'fl-cpu-ok');
+	if (defined('TEMPLATE_DIR') && basename(TEMPLATE_DIR) == 'flavor') {
+		return '<div class="fl-bar-track"><div class="fl-bar-fill ' . $cls . '" id="cpubarfill" style="width:' . round($pct, 2) . '%"></div></div>';
+	}
+	if (extension_loaded('gd') && function_exists('gd_info')) {
+		return '<img src="' . CLASS_DIR . 'bar.php?rating=' . round($pct, 2) . '" border="0" name="cpupercent" id="cpupercent" alt="" />';
+	}
+	return '';
+}
+function fl_cpu_history_add($pct) {
+	$histFile = CONFIG_DIR . 'cpu_history.json';
+	$hist = array();
+	if (is_file($histFile)) {
+		$hist = @json_decode(@file_get_contents($histFile), true);
+		if (!is_array($hist)) $hist = array();
+	}
+	$hist[] = array(round((float)$pct, 2), time());
+	while (count($hist) > 30) array_shift($hist);
+	$fp = @fopen($histFile, 'c');
+	if ($fp) {
+		@flock($fp, LOCK_EX);
+		@ftruncate($fp, 0);
+		@fwrite($fp, json_encode(array_values($hist)));
+		@flock($fp, LOCK_UN);
+		@fclose($fp);
+	}
+	return array_values($hist);
+}
 $frei = disk_free_space ( "./" );
 $insgesamt = disk_total_space ( "./" );
 $belegt = $insgesamt - $frei;
 $prozent_belegt = 100 * $belegt / $insgesamt;
 	if ($os == "windows") {
+		$cpu_string = lang(136).': ';
+		$cpu_load = false;
+		// 1) COM/WMI (fastest, when the extension is enabled)
 		if (class_exists('COM')) {
-			$wmi = new COM ( "Winmgmts://" );
-			$cpus = $wmi->execquery ( "SELECT * FROM Win32_Processor" );
-			$cpu_string = lang(136).':';
-			$cpu_load = 0;
-			foreach ( $cpus as $cpu ) {
-				$cpu_load += $cpu->loadpercentage;
-				$cpu_string .= "" . $cpu->loadpercentage;
+			try {
+				$wmi = new COM ( "Winmgmts://" );
+				$cpus = $wmi->execquery ( "SELECT * FROM Win32_Processor" );
+				$cpu_load = 0;
+				$count = 0;
+				foreach ( $cpus as $cpu ) {
+					$cpu_load += $cpu->loadpercentage;
+					$count++;
+				}
+				if ($count > 0) $cpu_load /= $count; else $cpu_load = false;
+			} catch ( Exception $e ) {
+				$cpu_load = false;
 			}
-			$cpu_load /= (is_array($cpus) ? count($cpus) : 1);
-			$cpu_string .= '%<br /><img src="' . CLASS_DIR . 'bar.php?rating=' . round ( $cpu_load, "2" ) . '" border="0" /><br />';
+		}
+		// 2) PowerShell CIM query (works on modern Windows where wmic was removed)
+		if ($cpu_load === false) {
+			$ps_out = @shell_exec('powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average" 2>NUL');
+			if ($ps_out !== null && is_numeric(trim($ps_out))) $cpu_load = (float)trim($ps_out);
+		}
+		// 3) wmic fallback (older Windows)
+		if ($cpu_load === false) {
+			$wmic_out = @shell_exec('wmic cpu get loadpercentage 2>NUL');
+			if ($wmic_out !== null && preg_match('/(\d+)/', $wmic_out, $m)) $cpu_load = (float)$m[1];
+		}
+		if ($cpu_load !== false) {
+			$cpulast = round($cpu_load, 2);
+			$cpu_string .= "<span id='cpuload'>" . round ( $cpu_load, "0" ) . "</span>%<br />";
+			$cpu_string .= fl_cpu_bar_html($cpu_load) . '<br />';
 		} else {
 			$cpu_string = lang(136).': ' . lang(137) . '<br />';
 		}
@@ -156,10 +207,7 @@ $prozent_belegt = 100 * $belegt / $insgesamt;
 		else {
 			$cpulast = 100 - $cpu ['idle'];
 			$cpu_string .= lang(136).": <span id='cpuload'>" . round ( $cpulast, "0" ) . "</span>%<br />";
-			if (extension_loaded('gd') && function_exists('gd_info')) {
-				$cpu_string .= '<img src="' . CLASS_DIR . 'bar.php?rating=' . round ( $cpulast, "2" ) . '" border="0" name="cpupercent" id="cpupercent" alt="" />';
-			}
-			$cpu_string .= '<br />';
+			$cpu_string .= fl_cpu_bar_html($cpulast) . '<br />';
 		}
 	} elseif ($os == "nocpu") {
 		$cpu_string = '';

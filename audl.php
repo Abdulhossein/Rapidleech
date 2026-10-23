@@ -10,6 +10,8 @@ ignore_user_abort(true);
 
 login_check();
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST') rl_csrf_validate();
+
 require(TEMPLATE_DIR . '/header.php');
 ?>
 <?php
@@ -388,6 +390,7 @@ function resetProgress() {
 		</div>
 		
 		<form action="?GO=GO" method="post">
+			<?php echo rl_csrf_field(); ?>
 			<!-- Tabs Navigation -->
 			<div class="rl-tabs">
 				<button type="button" class="rl-tab active" onclick="ViewPage('listing');"><?php echo lang(32); ?></button>

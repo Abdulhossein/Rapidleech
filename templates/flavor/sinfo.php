@@ -22,6 +22,19 @@
         </div>
         <?php if ($cpu_string !== -1) { ?>
         <div class="fl-stat-body"><?php echo $cpu_string; ?></div>
+        <div class="fl-cpu-graph">
+            <svg id="cpuSpark" class="fl-cpu-spark" width="100%" height="36" preserveAspectRatio="none" viewBox="0 0 100 36" aria-hidden="true">
+                <defs>
+                    <linearGradient id="cpuSparkFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="var(--fl-accent)" stop-opacity="0.35"/>
+                        <stop offset="100%" stop-color="var(--fl-accent)" stop-opacity="0"/>
+                    </linearGradient>
+                </defs>
+                <path id="cpuSparkArea" class="fl-cpu-spark-area" d="" fill="url(#cpuSparkFill)"/>
+                <path id="cpuSparkLine" class="fl-cpu-spark-line" d="" fill="none"/>
+            </svg>
+            <div class="fl-cpu-graph-meta"><span id="cpuSparkMin"></span><span id="cpuSparkNow"></span><span id="cpuSparkMax"></span></div>
+        </div>
         <?php } ?>
         <div style="margin-top:10px;font-size:13px;color:var(--fl-text-3);">
             <span class="cpu-clock-st-text"><?php echo lang(280); ?>:</span>

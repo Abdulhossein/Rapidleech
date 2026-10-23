@@ -1,14 +1,11 @@
 <?php
-if (!defined('RAPIDLEECH')) {
-	require_once('index.html');
-	exit;
-}
+if (!defined('RAPIDLEECH')) { exit('<a href="http://www.rapidleech.com">RapidLeech</a>: Access denied'); }
 
 $options = array (
   'secretkey' => 'Evp1dftLD0Gm6bXgjtkFSgNTHr7j6qy1JHgtGSJIC4I7ZwsSkJ3pG',
   'download_dir' => 'files/',
   'download_dir_is_changeable' => false,
-  'delete_delay' => 84600.0,
+  'delete_delay' => 84600,
   'rename_prefix' => '',
   'rename_suffix' => '',
   'rename_underscore' => true,
@@ -60,16 +57,50 @@ $options = array (
   '2gb_fix' => true,
   'forbidden_filetypes' => 
   array (
-    // Server-side scripts
-    '.htaccess', '.htpasswd', '.php', '.php3', '.php4', '.php5', '.phtml',
-    '.asp', '.aspx', '.cgi', '.bin',
-    // Executables
-    '.exe', '.msi', '.bat', '.cmd', '.com', '.scr', '.pif', '.vbs', '.vbe',
-    '.js', '.jse', '.wsf', '.wsh', '.ps1', '.psm1', '.sh', '.bash',
-    '.dll', '.sys', '.drv', '.ocx',
-    // Images (block fake large files disguised as images)
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.tiff', '.tif',
-    '.svg', '.webp', '.heic', '.heif',
+    0 => '.htaccess',
+    1 => '.htpasswd',
+    2 => '.php',
+    3 => '.php3',
+    4 => '.php4',
+    5 => '.php5',
+    6 => '.phtml',
+    7 => '.asp',
+    8 => '.aspx',
+    9 => '.cgi',
+    10 => '.bin',
+    11 => '.exe',
+    12 => '.msi',
+    13 => '.bat',
+    14 => '.cmd',
+    15 => '.com',
+    16 => '.scr',
+    17 => '.pif',
+    18 => '.vbs',
+    19 => '.vbe',
+    20 => '.js',
+    21 => '.jse',
+    22 => '.wsf',
+    23 => '.wsh',
+    24 => '.ps1',
+    25 => '.psm1',
+    26 => '.sh',
+    27 => '.bash',
+    28 => '.dll',
+    29 => '.sys',
+    30 => '.drv',
+    31 => '.ocx',
+    32 => '.png',
+    33 => '.jpg',
+    34 => '.jpeg',
+    35 => '.gif',
+    36 => '.bmp',
+    37 => '.ico',
+    38 => '.tiff',
+    39 => '.tif',
+    40 => '.svg',
+    41 => '.webp',
+    42 => '.heic',
+    43 => '.heif',
   ),
   'forbidden_filetypes_block' => true,
   'rename_these_filetypes_to' => '.xxx',
@@ -80,15 +111,9 @@ $options = array (
   'parallel_chunks' => 8,
   'admin_user' => 'admin',
   'admin_pass' => 'admin',
-  // yt-dlp plugin: path to the yt-dlp binary
-  // Linux default: '/usr/local/bin/yt-dlp'
-  // Windows default: auto-detects yt-dlp.exe in project root or PATH
-  // Set to false or remove to use auto-detection
   'ytdlp_binary' => false,
-); 
+);
 
 require_once('site_checker.php');
 require_once('accounts.php');
-
 $secretkey =& $options['secretkey'];
-?>

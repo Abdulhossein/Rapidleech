@@ -13,9 +13,12 @@ $nn = "\r\n";
 if (!empty($options['login'])) {
     $ajax_action = $_GET['ajax'] ?? '';
     // Allow public-safe read-only status checks without auth
-    $public_ajax = array('pending_downloads', 'server_stats', 'mega_queue_check');
+    $public_ajax = array('pending_downloads', 'server_stats', 'mega_queue_check', 'visitor_badge');
     if (!in_array($ajax_action, $public_ajax, true)) {
-        if (empty($_SESSION)) @session_start();
+        if (session_status() === PHP_SESSION_NONE) {
+            session_name('rl_session');
+            @session_start();
+        }
         if (empty($_SESSION['rl_logged_in'])) {
             header('Content-Type: application/json');
             http_response_code(401);
@@ -606,7 +609,9 @@ switch ($_GET['ajax']) {
 			$AjaxReturn['DiskSpace'] = ZahlenFormatieren($insgesamt);
 			$AjaxReturn['CPULoad'] = round($cpulast, '0');
 			$AjaxReturn['CPUPercent'] = round($cpulast, '2');
-			echo array_to_json($AjaxReturn);
+			$AjaxReturn['CPUHistory'] = fl_cpu_history_add($cpulast);
+			header('Content-Type: application/json');
+			echo json_encode($AjaxReturn);
 		}
 		break;
 	case 'mega_queue_check':
@@ -638,6 +643,36 @@ switch ($_GET['ajax']) {
 		} else {
 			echo json_encode(array('status' => 'busy', 'downloads' => $activeDownloads, 'max' => $maxSlots));
 		}
+		break;
+	case 'visitor_badge':
+		// Self-hosted visitor badge (today / total), replaces the old hits.sh image
+		$file = CONFIG_DIR . 'visits.json';
+		$data = json_decode((string)@file_get_contents($file), true);
+		if (!is_array($data) || !isset($data['total'])) $data = array('today' => 0, 'total' => 0);
+		$today = isset($data['today']) ? (int)$data['today'] : 0;
+		$total = isset($data['total']) ? (int)$data['total'] : 0;
+		$label = 'Visitors';
+		$value = $today . ' / ' . number_format($total);
+		$font = 'Verdana,Geneva,DejaVu Sans,sans-serif';
+		$fs = 11;
+		$pad = 14;
+		$lw = $pad * 2 + (int)(strlen($label) * $fs * 0.62);
+		$vw = $pad * 2 + (int)(strlen($value) * $fs * 0.62);
+		$h = 28;
+		$esc = function ($s) { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); };
+		header('Content-Type: image/svg+xml; charset=utf-8');
+		header('Cache-Control: no-store, no-cache, must-revalidate');
+		echo '<svg xmlns="http://www.w3.org/2000/svg" width="' . ($lw + $vw) . '" height="' . $h . '" role="img" aria-label="' . $esc($label) . ': ' . $esc($value) . '">'
+			. '<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>'
+			. '<clipPath id="r"><rect width="' . ($lw + $vw) . '" height="' . $h . '" rx="4" fill="#fff"/></clipPath>'
+			. '<g clip-path="url(#r)">'
+			. '<rect width="' . $lw . '" height="' . $h . '" fill="#00aaff"/>'
+			. '<rect x="' . $lw . '" width="' . $vw . '" height="' . $h . '" fill="#0d1117"/>'
+			. '<rect width="' . ($lw + $vw) . '" height="' . $h . '" fill="url(#s)"/></g>'
+			. '<g fill="#fff" text-anchor="middle" font-family="' . $font . '" font-size="' . $fs . '">'
+			. '<text x="' . (int)($lw / 2) . '" y="' . (int)($h / 2 + $fs * 0.35) . '">' . $esc($label) . '</text>'
+			. '<text x="' . ($lw + (int)($vw / 2)) . '" y="' . (int)($h / 2 + $fs * 0.35) . '">' . $esc($value) . '</text>'
+			. '</g></svg>';
 		break;
 	case 'linkcheck':
 		require_once(CLASS_DIR.'linkchecker.php');

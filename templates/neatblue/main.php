@@ -94,6 +94,7 @@ if (!$options['notes_disable']) {
 <tr>
 <td align="center">
 <form action="<?php echo $PHP_SELF; ?>" name="transload" method="post"<?php if ($options['new_window']) { echo ' target="_blank"'; } ?>>
+<?php echo rl_csrf_field(); ?>
 <table class="tab-content" id="tb1" cellspacing="5" width="100%">
 <tbody>
 <tr>
@@ -253,6 +254,7 @@ else
 </span>
 <br /><br />
 <form action="<?php echo $PHP_SELF; ?>" name="flist" method="post">
+<?php echo rl_csrf_field(); ?>
 <?php echo renderActions(); ?>
 <div style="position:relative; width:800px; padding:1px 0px 1px 0px;">
 <div style="overflow:auto; height:auto; max-height:450px; width: 800px;">

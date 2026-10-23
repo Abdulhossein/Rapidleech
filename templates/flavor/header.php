@@ -51,7 +51,7 @@
     </script>
     <script type="text/javascript" src="classes/js.js"></script>
     <?php
-    if ($GLOBALS['options']['ajax_refresh']) { echo '<script type="text/javascript" src="classes/ajax_refresh.js"></script>'.$nn; }
+    if ($GLOBALS['options']['ajax_refresh']) { echo '<script type="text/javascript" src="classes/ajax_refresh.js?v=49"></script>'.$nn; }
     if ($GLOBALS['options']['flist_sort'])   { echo '<script type="text/javascript" src="classes/sorttable.js"></script>'.$nn; }
     ?>
 </head>
