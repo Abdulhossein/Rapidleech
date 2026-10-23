@@ -47,7 +47,7 @@
 <script type="text/javascript">
 //<![CDATA[
 function goforit(){
-    setTimeout("getthedate()", 1000);
+    setTimeout(getthedate, 1000);
     timeDiff('<?php echo date('Y'); ?>','<?php echo date('n'); ?>','<?php echo date('j'); ?>','<?php echo date('G'); ?>','<?php echo date('i'); ?>','<?php echo date('s'); ?>','dd-mm-yyyy');
 }
 $(document).ready(function(){ goforit(); });

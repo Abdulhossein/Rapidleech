@@ -13,7 +13,7 @@ $nn = "\r\n";
 if (!empty($options['login'])) {
     $ajax_action = $_GET['ajax'] ?? '';
     // Allow public-safe read-only status checks without auth
-    $public_ajax = array('pending_downloads', 'server_stats', 'mega_queue_check', 'visitor_badge');
+    $public_ajax = array('pending_downloads', 'server_stats', 'mega_queue_check', 'visitor_badge', 'live_stream');
     if (!in_array($ajax_action, $public_ajax, true)) {
         if (session_status() === PHP_SESSION_NONE) {
             session_name('rl_session');
@@ -35,225 +35,222 @@ if (!function_exists('str_ends_with')) {
     }
 }
 
+/**
+ * Scan the download dir for in-progress downloads (shared by
+ * pending_downloads polling and the SSE live stream).
+ */
+function rl_scan_pending_downloads() {
+    global $options;
+    if (!str_ends_with($options['download_dir'], '/')) {
+        $options['download_dir'] .= '/';
+    }
+    $download_dir = $options['download_dir'];
+    $pending = array();
+    $chunkGroups = array();
+    $metaFiles = array();
+    $fileMetaFiles = array();
+    $staleMetaAge = 3600;
+
+    $completedFiles = array();
+    $filesLst = @file(CONFIG_DIR . 'files.lst', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($filesLst) {
+        foreach ($filesLst as $line) {
+            $entry = @unserialize(trim($line));
+            if ($entry && !empty($entry['name'])) {
+                $completedFiles[basename($entry['name'])] = true;
+            }
+        }
+    }
+
+    if (is_dir($download_dir) && ($dir = @opendir($download_dir))) {
+        $now = time();
+        while (($file = readdir($dir)) !== false) {
+            if ($file === '.' || $file === '..') continue;
+            $filepath = $download_dir . $file;
+            if (!is_file($filepath)) continue;
+
+            $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+            $mtime = @filemtime($filepath);
+            $size = @filesize($filepath);
+            $age = $now - $mtime;
+
+            if (preg_match('/^\.chunk_([a-f0-9]+)\.meta$/', $file, $matches)) {
+                $metaContent = @file_get_contents($filepath);
+                if ($metaContent) {
+                    $metaData = @json_decode($metaContent, true);
+                    if ($metaData) $metaFiles[$matches[1]] = $metaData;
+                }
+                continue;
+            }
+            if (preg_match('/^\.(.+)\.meta$/', $file, $matches)) {
+                $metaContent = @file_get_contents($filepath);
+                if ($metaContent) {
+                    $metaData = @json_decode($metaContent, true);
+                    if ($metaData) $fileMetaFiles[$matches[1]] = $metaData;
+                }
+                continue;
+            }
+            if (preg_match('/^\.chunk_([a-f0-9]+)_(\d+)\.tmp$/', $file, $matches)) {
+                $chunkGroup = $matches[1];
+                $chunkNum = (int)$matches[2];
+                if (!isset($chunkGroups[$chunkGroup])) {
+                    $chunkGroups[$chunkGroup] = array('chunks' => array(), 'total_size' => 0, 'latest_mtime' => 0, 'age' => $age);
+                }
+                $chunkGroups[$chunkGroup]['chunks'][$chunkNum] = $size;
+                $chunkGroups[$chunkGroup]['total_size'] += $size;
+                if ($mtime > $chunkGroups[$chunkGroup]['latest_mtime']) {
+                    $chunkGroups[$chunkGroup]['latest_mtime'] = $mtime;
+                    $chunkGroups[$chunkGroup]['age'] = $age;
+                }
+                continue;
+            }
+            if (isset($completedFiles[$file])) continue;
+            if ($file[0] === '.' || $file === 'index.html' || $file === 'mega_dl.php') continue;
+
+            $isPending = false;
+            $status = '';
+            if ($ext === 'part' || $ext === 'tmp' || $ext === 'download') {
+                $isPending = true;
+                $status = 'Downloading...';
+            } elseif ($size === 0 && $age < 30) {
+                $isPending = true;
+                $status = 'Starting...';
+            }
+
+            if ($isPending) {
+                $totalSize = 0;
+                $progress = 0;
+                $sizeDisplay = bytesToKbOrMbOrGb($size);
+                if (isset($fileMetaFiles[$file]) && isset($fileMetaFiles[$file]['filesize'])) {
+                    $totalSize = $fileMetaFiles[$file]['filesize'];
+                    if ($totalSize > 0) {
+                        $progress = round(($size / $totalSize) * 100, 1);
+                        $sizeDisplay = bytesToKbOrMbOrGb($size) . ' / ' . bytesToKbOrMbOrGb($totalSize);
+                        $status = $progress . '%';
+                    }
+                }
+                $pending[] = array(
+                    'filename' => $file,
+                    'size' => $sizeDisplay,
+                    'modified' => date('H:i:s', $mtime),
+                    'status' => $status,
+                    'progress' => $progress,
+                    'age' => $age,
+                    'bytes' => (int)$size,
+                    'totalBytes' => (int)$totalSize
+                );
+            }
+        }
+        closedir($dir);
+    }
+
+    $now = time();
+    foreach ($metaFiles as $hash => $meta) {
+        if (!isset($chunkGroups[$hash])) {
+            $metaPath = $download_dir . '.chunk_' . $hash . '.meta';
+            $metaAge = $now - @filemtime($metaPath);
+            if (!empty($meta['status']) && $meta['status'] === 'merging' && $metaAge < 600) {
+                $pending[] = array(
+                    'filename' => !empty($meta['filename']) ? $meta['filename'] : 'Unknown',
+                    'size' => bytesToKbOrMbOrGb(!empty($meta['filesize']) ? $meta['filesize'] : 0),
+                    'modified' => date('H:i:s', @filemtime($metaPath)),
+                    'status' => 'Merging Parts...',
+                    'progress' => 100,
+                    'age' => $metaAge,
+                    'bytes' => (int)(!empty($meta['filesize']) ? $meta['filesize'] : 0),
+                    'totalBytes' => (int)(!empty($meta['filesize']) ? $meta['filesize'] : 0)
+                );
+            } elseif ($metaAge > $staleMetaAge) {
+                @unlink($metaPath);
+                unset($metaFiles[$hash]);
+            }
+        }
+    }
+    foreach ($fileMetaFiles as $origFile => $meta) {
+        $metaPath = $download_dir . '.' . $origFile . '.meta';
+        $metaAge = $now - @filemtime($metaPath);
+        if (isset($completedFiles[$origFile]) || $metaAge > $staleMetaAge) {
+            @unlink($metaPath);
+            unset($fileMetaFiles[$origFile]);
+        }
+    }
+
+    foreach ($chunkGroups as $hash => $group) {
+        $filename = 'Downloading...';
+        $totalSize = $group['total_size'];
+        if (isset($metaFiles[$hash])) {
+            $meta = $metaFiles[$hash];
+            if (isset($meta['filename'])) $filename = $meta['filename'];
+            if (isset($meta['filesize'])) $totalSize = $meta['filesize'];
+        }
+        $progressPercent = ($totalSize > 0) ? min(100, round(($group['total_size'] / $totalSize) * 100, 1)) : 0;
+        $dlStatus = 'Downloading... ' . $progressPercent . '%';
+        if (isset($metaFiles[$hash]) && !empty($metaFiles[$hash]['status']) && $metaFiles[$hash]['status'] === 'merging') {
+            $dlStatus = 'Merging Parts...';
+            $progressPercent = 100;
+        }
+        $chunkList = $group['chunks'];
+        ksort($chunkList);
+        $metaChunks = isset($metaFiles[$hash]['chunks']) ? (int)$metaFiles[$hash]['chunks'] : 0;
+        $chunkBytes = ($metaChunks > 0 && $totalSize > 0) ? (int)ceil($totalSize / $metaChunks) : 0;
+        $pending[] = array(
+            'filename' => $filename,
+            'size' => bytesToKbOrMbOrGb($group['total_size']) . ' / ' . bytesToKbOrMbOrGb($totalSize),
+            'modified' => date('H:i:s', $group['latest_mtime']),
+            'status' => $dlStatus,
+            'progress' => $progressPercent,
+            'age' => $group['age'],
+            'bytes' => (int)$group['total_size'],
+            'totalBytes' => (int)$totalSize,
+            'chunks' => array_values($chunkList),
+            'chunkBytes' => $chunkBytes
+        );
+    }
+
+    usort($pending, function($a, $b) { return strcasecmp($a['filename'], $b['filename']); });
+    return $pending;
+}
+
 // For ajax calls, lets make it use less resource as possible
 switch ($_GET['ajax']) {
 	case 'pending_downloads':
 		// Get pending/in-progress downloads (files with download-related extensions)
-		if (!str_ends_with($options['download_dir'], '/')) {
-			$options['download_dir'] .= '/';
-		}
-		$download_dir = $options['download_dir'];
-		$pending = array();
-		$chunkGroups = array(); // Group chunk files by base name
-		$metaFiles = array(); // Store metadata files for chunk downloads
-		$fileMetaFiles = array(); // Store metadata files for single-stream downloads
-		$staleMetaAge = 3600; // Auto-cleanup .meta files older than 1 hour with no active chunks
-		
-		// Load completed files list to exclude them from pending
-		$completedFiles = array();
-		$filesLst = @file(CONFIG_DIR . 'files.lst', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-		if ($filesLst) {
-			foreach ($filesLst as $line) {
-				$entry = @unserialize(trim($line));
-				if ($entry && !empty($entry['name'])) {
-					$completedFiles[basename($entry['name'])] = true;
-				}
-			}
-		}
-		
-		if (is_dir($download_dir) && ($dir = @opendir($download_dir))) {
-			$now = time();
-			while (($file = readdir($dir)) !== false) {
-				if ($file === '.' || $file === '..') {
-					continue;
-				}
-				$filepath = $download_dir . $file;
-				if (!is_file($filepath)) {
-					continue;
-				}
-				
-				$ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-				$mtime = @filemtime($filepath);
-				$size = @filesize($filepath);
-				$age = $now - $mtime;
-				
-				// Check for chunk metadata files (.chunk_*.meta)
-				if (preg_match('/^\.chunk_([a-f0-9]+)\.meta$/', $file, $matches)) {
-					$metaHash = $matches[1];
-					$metaContent = @file_get_contents($filepath);
-					if ($metaContent) {
-						$metaData = @json_decode($metaContent, true);
-						if ($metaData) {
-							$metaFiles[$metaHash] = $metaData;
-						}
-					}
-					continue;
-				}
-				
-				// Check for per-file metadata (.<filename>.meta)
-				if (preg_match('/^\.(.+)\.meta$/', $file, $matches)) {
-					$originalFile = $matches[1];
-					$metaContent = @file_get_contents($filepath);
-					if ($metaContent) {
-						$metaData = @json_decode($metaContent, true);
-						if ($metaData) {
-							$fileMetaFiles[$originalFile] = $metaData;
-						}
-					}
-					continue;
-				}
-				
-				// Check for parallel download chunk files (.chunk_*_*.tmp)
-				if (preg_match('/^\.chunk_([a-f0-9]+)_(\d+)\.tmp$/', $file, $matches)) {
-					$chunkGroup = $matches[1];
-					$chunkNum = (int)$matches[2];
-					if (!isset($chunkGroups[$chunkGroup])) {
-						$chunkGroups[$chunkGroup] = array(
-							'chunks' => array(),
-							'total_size' => 0,
-							'latest_mtime' => 0,
-							'age' => $age
-						);
-					}
-					$chunkGroups[$chunkGroup]['chunks'][$chunkNum] = $size;
-					$chunkGroups[$chunkGroup]['total_size'] += $size;
-					if ($mtime > $chunkGroups[$chunkGroup]['latest_mtime']) {
-						$chunkGroups[$chunkGroup]['latest_mtime'] = $mtime;
-						$chunkGroups[$chunkGroup]['age'] = $age;
-					}
-					continue;
-				}
-				
-				// Skip files already registered as completed downloads
-				if (isset($completedFiles[$file])) {
-					continue;
-				}
-				
-				// Skip hidden files and known non-download files
-				if ($file[0] === '.' || $file === 'index.html' || $file === 'mega_dl.php') {
-					continue;
-				}
-				
-				// Only consider as pending if:
-				// 1. Has explicit download-in-progress extension (.part, .tmp, .download)
-				// 2. Zero-byte file created in last 30 seconds (just starting)
-				// Do NOT flag normal completed files just because they were recently modified
-				$isPending = false;
-				$status = '';
-				
-				if ($ext === 'part' || $ext === 'tmp' || $ext === 'download') {
-					$isPending = true;
-					$status = 'Downloading...';
-				} elseif ($size === 0 && $age < 30) {
-					$isPending = true;
-					$status = 'Starting...';
-				}
-				
-				if ($isPending) {
-					// Check if we have metadata for this file
-					$totalSize = 0;
-					$progress = 0;
-					$sizeDisplay = bytesToKbOrMbOrGb($size);
-					
-					if (isset($fileMetaFiles[$file]) && isset($fileMetaFiles[$file]['filesize'])) {
-						$totalSize = $fileMetaFiles[$file]['filesize'];
-						if ($totalSize > 0) {
-							$progress = round(($size / $totalSize) * 100, 1);
-							$sizeDisplay = bytesToKbOrMbOrGb($size) . ' / ' . bytesToKbOrMbOrGb($totalSize);
-							$status = $progress . '%';
-						}
-					}
-					
-					$pending[] = array(
-						'filename' => $file,
-						'size' => $sizeDisplay,
-						'modified' => date('H:i:s', $mtime),
-						'status' => $status,
-						'progress' => $progress,
-						'age' => $age
-					);
-				}
-			}
-			closedir($dir);
-		}
-		
-		// Auto-cleanup orphaned .meta files AND show merging-only entries
-		$now = time();
-		foreach ($metaFiles as $hash => $meta) {
-			if (!isset($chunkGroups[$hash])) {
-				$metaPath = $download_dir . '.chunk_' . $hash . '.meta';
-				$metaAge = $now - @filemtime($metaPath);
-				
-				// If meta says "merging" and is recent, show it as merging in pending
-				if (!empty($meta['status']) && $meta['status'] === 'merging' && $metaAge < 600) {
-					$pending[] = array(
-						'filename' => !empty($meta['filename']) ? $meta['filename'] : 'Unknown',
-						'size' => bytesToKbOrMbOrGb(!empty($meta['filesize']) ? $meta['filesize'] : 0),
-						'modified' => date('H:i:s', @filemtime($metaPath)),
-						'status' => 'Merging Parts...',
-						'progress' => 100,
-						'age' => $metaAge
-					);
-				} elseif ($metaAge > $staleMetaAge) {
-					@unlink($metaPath);
-					unset($metaFiles[$hash]);
-				}
-			}
-		}
-		// Cleanup per-file .meta where file is already in files.lst or meta is stale
-		foreach ($fileMetaFiles as $origFile => $meta) {
-			$metaPath = $download_dir . '.' . $origFile . '.meta';
-			$metaAge = $now - @filemtime($metaPath);
-			if (isset($completedFiles[$origFile]) || $metaAge > $staleMetaAge) {
-				@unlink($metaPath);
-				unset($fileMetaFiles[$origFile]);
-			}
-		}
-		
-		// Add parallel chunk downloads as single entries
-		foreach ($chunkGroups as $hash => $group) {
-			$numChunks = count($group['chunks']);
-			
-			// Try to get actual filename from pre-collected metadata
-			$filename = 'Downloading...';
-			$totalSize = $group['total_size'];
-			
-			if (isset($metaFiles[$hash])) {
-				$meta = $metaFiles[$hash];
-				if (isset($meta['filename'])) {
-					$filename = $meta['filename'];
-				}
-				if (isset($meta['filesize'])) {
-					$totalSize = $meta['filesize'];
-				}
-			}
-			
-			$progressPercent = ($totalSize > 0) ? round(($group['total_size'] / $totalSize) * 100, 1) : 0;
-			
-			// Check if meta indicates merging status
-			$dlStatus = 'Downloading... ' . $progressPercent . '%';
-			if (isset($metaFiles[$hash]) && !empty($metaFiles[$hash]['status']) && $metaFiles[$hash]['status'] === 'merging') {
-				$dlStatus = 'Merging Parts...';
-				$progressPercent = 100;
-			}
-			
-			$pending[] = array(
-				'filename' => $filename,
-				'size' => bytesToKbOrMbOrGb($group['total_size']) . ' / ' . bytesToKbOrMbOrGb($totalSize),
-				'modified' => date('H:i:s', $group['latest_mtime']),
-				'status' => $dlStatus,
-				'progress' => $progressPercent,
-				'age' => $group['age']
-			);
-		}
-		
-		// Sort by filename alphabetically (ascending)
-		usort($pending, function($a, $b) { return strcasecmp($a['filename'], $b['filename']); });
-		
 		header('Content-Type: application/json');
-		echo json_encode(array('downloads' => $pending));
+		echo json_encode(array('downloads' => rl_scan_pending_downloads()));
 		break;
-	
+
+	case 'live_stream':
+		// Server-Sent Events: real-time download progress. Clients without
+		// SSE support fall back to pending_downloads polling automatically.
+		if (ob_get_level()) @ob_end_clean();
+		header('Content-Type: text/event-stream');
+		header('Cache-Control: no-store, no-cache, must-revalidate');
+		header('X-Accel-Buffering: no');
+		@set_time_limit(0);
+		$lastJson = null;
+		$lastSend = 0;
+		$deadline = time() + 300; // recycle connection every 5 min; EventSource reconnects
+		while (connection_aborted() === 0 && time() < $deadline) {
+			$pending = rl_scan_pending_downloads();
+			$json = json_encode(array('downloads' => $pending));
+			if ($json !== $lastJson || (time() - $lastSend) >= 5) {
+				echo 'event: progress' . "\n";
+				echo 'data: ' . $json . "\n\n";
+				@flush();
+				if (function_exists('ob_flush')) @ob_flush();
+				flush();
+				$lastJson = $json;
+				$lastSend = time();
+			}
+			if (empty($pending) && (time() - $lastSend) >= 15) {
+				echo ": keepalive\n\n";
+				@flush();
+				flush();
+				$lastSend = time();
+			}
+			sleep(1);
+		}
+		break;
 	case 'queue_status':
 		// Get download queue status AND pending file downloads
 		require_once CLASS_DIR . 'download_queue.php';

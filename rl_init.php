@@ -14,13 +14,16 @@ ob_implicit_flush(true);
 header('X-Accel-Buffering: no');
 clearstatcache();
 error_reporting(6135);
+// Never display errors to users (any hosting); keep file logging for debugging
+@ini_set('display_errors', 0);
+@ini_set('display_startup_errors', 0);
 // Enable PHP error logging to file for debugging
 @ini_set('log_errors', 1);
 @ini_set('error_log', (defined('CONFIG_DIR') ? CONFIG_DIR : 'configs/') . 'php_errors.log');
 $nn = "\r\n";
 $fromaddr = 'RapidLeech';
 $dev_name = 'Development Stage';
-$rev_num = '48';
+$rev_num = '51';
 $plusrar_v = '4.2';
 $rl_version = '2.5.0';
 $PHP_SELF = $_SERVER['SCRIPT_NAME'];
@@ -52,6 +55,22 @@ header('Last-Modified: ' . gmdate ("D, d M Y H:i:s") . 'GMT');
 header('Cache-Control: max-age=0, no-store, no-cache, must-revalidate, proxy-revalidate, post-check=0, pre-check=0');
 header('Pragma: no-cache');
 
+// ============================================
+// SECURE TRANSPORT DETECTION & HSTS
+// Detects HTTPS even behind reverse proxies.
+// HSTS is only sent over secure connections so
+// plain-HTTP installs (localhost, cPanel) are unaffected.
+// ============================================
+function rl_is_https() {
+	if (!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off') return true;
+	if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') return true;
+	if (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443) return true;
+	return false;
+}
+if (rl_is_https()) {
+	header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
+
 require_once(CLASS_DIR . 'other.php');
 require_once(CLASS_DIR . 'logger.php');
 
@@ -63,6 +82,14 @@ require_once(CLASS_DIR . 'logger.php');
 if (session_status() === PHP_SESSION_NONE && PHP_SAPI !== 'cli') {
 	session_name('rl_session');
 	@session_start();
+	// Harden the session cookie (Secure only when actually on HTTPS)
+	@setcookie(session_name(), session_id(), [
+		'expires'  => 0,
+		'path'     => '/',
+		'secure'   => rl_is_https(),
+		'httponly' => true,
+		'samesite' => 'Lax',
+	]);
 }
 
 function rl_csrf_token() {
@@ -96,7 +123,7 @@ function get_user_token() {
         return $_COOKIE['rl_user_token'];
     }
     $token = bin2hex(random_bytes(16));
-    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    $secure = rl_is_https();
     @setcookie('rl_user_token', $token, [
         'expires'  => time() + 365 * 86400,
         'path'     => '/',

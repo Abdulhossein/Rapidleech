@@ -531,7 +531,7 @@ ob_start();
 ?>
 <div id="server_stats"><?php require_once(CLASS_DIR."sinfo.php"); ?></div>
 <?php if ($options['ajax_refresh']) { ?>
-<script type="text/javascript">var stats_timer = setTimeout("refreshStats()",10 * 1000);</script>
+<script type="text/javascript">var stats_timer = setTimeout(refreshStats,10 * 1000);</script>
 <?php
 }
 ob_end_flush();

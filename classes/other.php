@@ -30,6 +30,31 @@ function create_hosts_file($host_file = 'hosts.php') { // To be rewritten or del
 function login_check() {
 	global $options;
 	if ($options['login']) {
+		// Brute-force lockout + optional Turnstile (both silent when unavailable)
+		if (defined('CLASS_DIR') && file_exists(CLASS_DIR . 'security.php')) {
+			require_once(CLASS_DIR . 'security.php');
+			$lockKey = 'site|' . rl_client_ip();
+			RL_Lockout::gc();
+			$lockOk = RL_Lockout::check($lockKey);
+			$credsOk = false;
+			if (!empty($_SERVER['PHP_AUTH_USER'])) {
+				foreach ($options['users'] as $user => $pass) {
+					if (hash_equals((string)$user, (string)$_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW']) && hash_equals((string)$pass, (string)$_SERVER['PHP_AUTH_PW'])) { $credsOk = true; break; }
+				}
+			}
+			if (!$credsOk) {
+				if ($lockOk) RL_Lockout::fail($lockKey);
+			} else {
+				RL_Lockout::reset($lockKey);
+			}
+			if (!$lockOk || !$credsOk || !RL_Turnstile::verify()) {
+				header('WWW-Authenticate: Basic realm="RAPIDLEECH PLUGMOD"');
+				header('HTTP/1.0 401 Unauthorized');
+				include('deny.php');
+				exit;
+			}
+			return;
+		}
 		function logged_user($ul) {
 			foreach ($ul as $user => $pass) {
 				if ($_SERVER['PHP_AUTH_USER'] == $user && isset($_SERVER['PHP_AUTH_PW']) && $_SERVER['PHP_AUTH_PW'] == $pass) return true;
@@ -416,6 +441,14 @@ function lang($id) {
 function encrypt($string) {
 	global $secretkey;
 	if (!$secretkey) return html_error('Value for $secretkey is empty, please create a random one (56 chars max) in config.php!');
+	// Prefer Sodium (modern, authenticated) when available; versioned prefix
+	// lets decrypt() auto-detect the algorithm. Falls back to Blowfish silently.
+	if (function_exists('sodium_crypto_secretbox')) {
+		$key = substr(hash('sha256', $secretkey, true), 0, SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+		$nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+		$ciphertext = sodium_crypto_secretbox($string, $nonce, $key);
+		return 's1:' . base64_encode($nonce . $ciphertext);
+	}
 	require_once 'class.pcrypt.php';
 
 	/*
@@ -434,6 +467,17 @@ function encrypt($string) {
 function decrypt($string) {
 	global $secretkey;
 	if (!$secretkey) return html_error('Value for $secretkey is empty, please create a random one (56 chars max) in config.php!');
+	// Versioned Sodium ciphertext ('s1:...') — authenticated decryption
+	if (is_string($string) && strpos($string, 's1:') === 0) {
+		$raw = base64_decode(substr($string, 3), true);
+		if ($raw !== false && strlen($raw) > SODIUM_CRYPTO_SECRETBOX_NONCEBYTES && function_exists('sodium_crypto_secretbox_open')) {
+			$key = substr(hash('sha256', $secretkey, true), 0, SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+			$nonce = substr($raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+			$plain = sodium_crypto_secretbox_open(substr($raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), $nonce, $key);
+			if ($plain !== false) return $plain;
+		}
+		return '';
+	}
 	require_once 'class.pcrypt.php';
 
 	/*

@@ -12,7 +12,7 @@ function new_transload_window() {
 	$('form[name=transload]').attr('target', 'rapidleech_' + tmp);
 	var options = 'width=700,height=320,toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=yes,resizable=no,copyhistory=no';
 	window.open('', 'rapidleech_' + tmp, options);
-	window.setTimeout('$(\'form[name=transload]\').submit();', 200);
+	window.setTimeout(function () { $('form[name=transload]').submit(); }, 200);
 }
 
 function table_filelist_refresh_headers() {
@@ -214,7 +214,7 @@ function fc(caption, displaytext) {
 	if (c > 0) {
 		document.getElementById("dl").innerHTML = caption + php_js_strings[87].replace('%1$s', c.toFixed(1));
 		c = c - 0.5;
-		setTimeout('fc(\'' + caption + '\',\'' + displaytext + '\')', 500);
+		setTimeout(function () { fc(caption, displaytext); }, 500);
 	} else {
 		document.getElementById('dl').style.display = 'none';
 		document.getElementById('code').innerHTML = unescape(displaytext);
@@ -264,7 +264,7 @@ function runClock(timeDiff, dateFormat) {
 
 	document.getElementById('server').innerHTML = fixNumber(now.getHours()) + ':' + fixNumber(now.getMinutes()) + ':' + fixNumber(now.getSeconds());
 
-	setTimeout('runClock(timeDiff,"' + dateFormat + '");', 1000);
+	setTimeout(function () { runClock(timeDiff, dateFormat); }, 1000);
 }
 
 /**
@@ -296,5 +296,5 @@ function getthedate() {
 
 	var cdate = '<span class="cpu-clock-lt-text">' + php_js_strings[281] + ':</span> &nbsp;&nbsp;&nbsp;<span class="cpu-clock-lt-time">' + hours + ':' + minutes + ':' + seconds + ' ' + dn + '</span><br />';
 	$('#clock').html(cdate);
-	setTimeout('getthedate()', 1000);
+	setTimeout(getthedate, 1000);
 }

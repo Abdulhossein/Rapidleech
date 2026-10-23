@@ -12,14 +12,40 @@ define('CONFIG_DIR', $configDir . '/');
 define('CLASS_DIR', $rootDir . '/classes/');
 require_once($configDir . '/config.php');
 require_once($rootDir . '/classes/logger.php');
+require_once($rootDir . '/classes/security.php');
 $ADMIN_USER = isset($options['admin_user']) ? $options['admin_user'] : 'admin';
 $ADMIN_PASS = isset($options['admin_pass']) ? $options['admin_pass'] : 'admin';
 
+// Brute-force lockout (per IP+user, exponential backoff) — silent when file unwritable
+$lockKey = 'admin|' . rl_client_ip();
+RL_Lockout::gc();
+$lockOk = RL_Lockout::check($lockKey);
+$badCreds = empty($_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_USER, $_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_PASS, $_SERVER['PHP_AUTH_PW']);
+if ($badCreds) {
+	if ($lockOk) RL_Lockout::fail($lockKey);
+} else {
+	RL_Lockout::reset($lockKey);
+}
 // Basic auth
-if (empty($_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_USER, $_SERVER['PHP_AUTH_USER']) || !hash_equals($ADMIN_PASS, $_SERVER['PHP_AUTH_PW'])) {
-    header('WWW-Authenticate: Basic realm="RapidLeech Admin"');
-    header('HTTP/1.0 401 Unauthorized');
-    die('Access Denied');
+if ($badCreds || !$lockOk) {
+	if (function_exists('rl_log')) rl_log('WARN', 'Admin login failed' . (!$lockOk ? ' (locked out)' : ''), array('ip' => rl_client_ip()));
+	header('WWW-Authenticate: Basic realm="RapidLeech Admin"');
+	header('HTTP/1.0 401 Unauthorized');
+	die('Access Denied');
+}
+
+// TOTP 2FA (optional): second step via ?otp= or X-RL-OTP header; disabled when no secret configured
+$ADMIN_TOTP_SECRET = isset($options['admin_totp_secret']) ? trim((string)$options['admin_totp_secret']) : '';
+if ($ADMIN_TOTP_SECRET !== '') {
+	$otp = '';
+	if (!empty($_GET['otp']) && is_string($_GET['otp'])) $otp = $_GET['otp'];
+	elseif (!empty($_SERVER['HTTP_X_RL_OTP']) && is_string($_SERVER['HTTP_X_RL_OTP'])) $otp = $_SERVER['HTTP_X_RL_OTP'];
+	elseif (!empty($_POST['rl_otp']) && is_string($_POST['rl_otp'])) $otp = $_POST['rl_otp'];
+	if (!RL_TOTP::verify($ADMIN_TOTP_SECRET, $otp)) {
+		header('HTTP/1.0 401 Unauthorized');
+		header('X-RL-OTP-Required: 1');
+		die('One-time code required. Append ?otp=123456 (from your authenticator app) to the URL.');
+	}
 }
 
 $filesDir = $rootDir . '/files';
@@ -157,6 +183,10 @@ function admin_settings_schema() {
             'fgc' => array('file_get_contents mode', 'num', '0 = off'),
             'parallel_download' => array('Parallel chunked downloads', 'bool', ''),
             'parallel_chunks' => array('Chunks per download', 'num', '1-16 recommended'),
+            'dedup_enabled' => array('Share identical downloads', 'bool', 'Concurrent requests for the same link join the first download instead of re-downloading'),
+            'selfheal_enabled' => array('Self-heal downloads', 'bool', 'Disk-space pre-check and automatic retry on failure'),
+            'selfheal_max_retries' => array('Self-heal max retries', 'num', '0-5'),
+            'selfheal_verify_checksum' => array('Self-heal checksum verify', 'bool', 'Verify SHA-256 after download when a hash is provided'),
             'ytdlp_binary' => array('yt-dlp binary path', 'ytdlp', 'Empty = auto-detect'),
         ),
         'Interface' => array(
@@ -552,6 +582,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $resetType = $fullReset ? 'Full reset (configs overwritten)' : 'Configs preserved';
             $message = "Git update completed. $resetType.";
             $messageType = 'success';
+            break;
+
+        case 'git_update_hosts':
+            // Update only hosts/ (download & upload plugins) from GitHub — configs, classes, templates untouched
+            $repoUrl = trim($_POST['repo_url'] ?? 'https://github.com/Abdulhossein/Rapidleech');
+            $branch = trim($_POST['repo_branch'] ?? 'main');
+            if (!preg_match('/^https:\/\/[a-zA-Z0-9._\-\/]+$/', $repoUrl)) {
+                $message = 'Invalid repository URL.';
+                $messageType = 'error';
+                break;
+            }
+            if (!preg_match('/^[a-zA-Z0-9._\-\/]+$/', $branch)) {
+                $message = 'Invalid branch name.';
+                $messageType = 'error';
+                break;
+            }
+            $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+            $tmpBase = rtrim(sys_get_temp_dir(), '/\\') . '/rl_hosts_update_' . getmypid();
+            @mkdir($tmpBase, 0777, true);
+            $tmpDir = $tmpBase . '/repo';
+            $repoUrlEsc = escapeshellarg($repoUrl);
+            $branchEsc = escapeshellarg($branch);
+            $tmpEsc = escapeshellarg($tmpDir);
+            $tmpBaseEsc = escapeshellarg($tmpBase);
+            $hostsEsc = escapeshellarg($rootDir . '/hosts');
+            if ($isWin) {
+                // Windows: robocopy /MIR mirrors hosts/ (delete removed plugins); exit codes 0-7 are success
+                $cmd = "rmdir /s /q " . escapeshellarg($tmpBase) . " 2>nul & mkdir " . escapeshellarg($tmpBase) . " && git clone --depth 1 --single-branch --branch $branchEsc $repoUrlEsc $tmpEsc 2>&1 && robocopy " . escapeshellarg($tmpDir . '/hosts') . " " . escapeshellarg($rootDir . '/hosts') . " /MIR /NJH /NDL & if %ERRORLEVEL% LEQ 7 (echo HOSTS_UPDATED) else (echo HOSTS_FAILED)";
+            } else {
+                $cmd = "rm -rf $tmpBaseEsc && mkdir -p $tmpBaseEsc && git clone --depth 1 --single-branch --branch $branchEsc $repoUrlEsc $tmpEsc 2>&1 && cp -a $tmpEsc/hosts/. $hostsEsc/ && echo HOSTS_UPDATED";
+            }
+            $output = shell_exec($cmd);
+            if ($isWin && strpos((string)$output, 'HOSTS_FAILED') !== false) {
+                $message = 'Hosts update failed. Check output below.';
+                $messageType = 'error';
+            } elseif (strpos((string)$output, 'HOSTS_UPDATED') === false && !$isWin) {
+                $message = 'Hosts update failed. Check output below.';
+                $messageType = 'error';
+            } else {
+                $message = 'Hosts plugins updated from GitHub. Configs, classes and templates untouched.';
+                $messageType = 'success';
+                rl_log_admin('Update hosts', 'hosts/ refreshed from ' . $repoUrl . '#' . $branch);
+            }
+            @shell_exec((($isWin ? 'rmdir /s /q ' : 'rm -rf ') . escapeshellarg($tmpBase)) . ' 2>&1');
             break;
 
         case 'install_deno':
@@ -1031,10 +1105,9 @@ label.check input{accent-color:#6366f1}
     <!-- Git Update -->
     <div class="card">
         <h2>🔄 Update from GitHub</h2>
-        <h3>Pulls latest code from a GitHub repo.</h3>
-        <form method="POST" onsubmit="return confirm(document.getElementById('full_reset').checked ? 'FULL RESET: This will OVERWRITE config.php and accounts.php with repo defaults!' : 'This will update code. Your accounts and config will be preserved.');">
+        <h3>Pull the whole code, or only the hosts/ plugins folder — separately.</h3>
+        <form method="POST" onsubmit="var m=this.querySelector('[name=update_mode]:checked').value;var fr=document.getElementById('full_reset').checked;return confirm(m==='hosts' ? 'Update ONLY the hosts/ plugins folder from GitHub? Everything else stays untouched.' : (fr ? 'FULL RESET: This will OVERWRITE config.php and accounts.php with repo defaults!' : 'This will update code. Your accounts and config will be preserved.'));">
             <input type="hidden" name="csrf_token" value="<?php echo $adminCsrf; ?>">
-            <input type="hidden" name="action" value="git_update">
             <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px">
                 <div>
                     <label style="display:block;font-size:12px;color:#606880;margin-bottom:4px">Repository URL</label>
@@ -1045,16 +1118,30 @@ label.check input{accent-color:#6366f1}
                     <input type="text" name="repo_branch" placeholder="main" value="<?php echo htmlspecialchars($_POST['repo_branch'] ?? 'main'); ?>">
                 </div>
             </div>
-            <div class="flex" style="margin-bottom:12px">
+            <div class="flex" style="margin-bottom:12px;flex-wrap:wrap;gap:14px">
+                <label class="check"><input type="radio" name="update_mode" value="full" checked> 📦 Whole code (git reset)</label>
+                <label class="check"><input type="radio" name="update_mode" value="hosts"> 🧩 Only hosts/ plugins</label>
+            </div>
+            <div class="flex" id="fullreset-row" style="margin-bottom:12px">
                 <label class="check"><input type="checkbox" name="full_reset" id="full_reset" value="1"> ⚠️ Full Reset (overwrite config.php & accounts.php)</label>
             </div>
             <div class="flex">
-                <button type="submit" class="btn btn-primary">🔄 Update from GitHub</button>
+                <button type="submit" class="btn btn-primary" onclick="this.form.action.value=this.form.querySelector('[name=update_mode]:checked').value==='hosts'?'git_update_hosts':'git_update'">🔄 Update from GitHub</button>
             </div>
+            <input type="hidden" name="action" value="git_update">
         </form>
-        <?php if (isset($output) && ($_POST['action'] ?? '') === 'git_update'): ?>
+        <?php if (isset($output) && in_array($_POST['action'] ?? '', ['git_update', 'git_update_hosts'], true)): ?>
         <div class="output"><?php echo htmlspecialchars($output); ?></div>
         <?php endif; ?>
+        <script>
+        (function(){
+            var f=document.querySelector('input[name=update_mode][value=hosts]');
+            var row=document.getElementById('fullreset-row');
+            if(f&&row){f.addEventListener('change',function(){row.style.display=f.checked?'none':'';});
+            var w=document.querySelector('input[name=update_mode][value=full]');
+            if(w)w.addEventListener('change',function(){if(w.checked)row.style.display='';});}
+        })();
+        </script>
     </div>
 
     <!-- Run Command -->
