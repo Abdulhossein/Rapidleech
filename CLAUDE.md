@@ -9,7 +9,7 @@ Context file for Claude Code. This document describes the project, architecture,
 **RapidLeech** is a server-side file download and transload manager. Users submit URLs via a web UI; the server downloads the file to `files/`, then users can optionally upload to another hosting service. No user registration — file ownership is enforced by a per-browser cookie token.
 
 - **Live server:** https://hashhackers.apranet.eu.org
-- **GitHub:** https://github.com/PBhadoo/Rapidleech
+- **GitHub:** https://github.com/Abdulhossein/Rapidleech
 - **Version:** 2.0.2 (rev 43)
 
 ---
@@ -285,6 +285,5 @@ Other 50+ plugins may work but are not actively tested.
 
 ## Credits
 
-- Maintained by [PBhadoo](https://github.com/PBhadoo)
-- Built with [Claude Opus 4.6](https://www.anthropic.com/) by Anthropic
+- Maintained by [Abdulhossein](https://github.com/Abdulhossein)
 - Based on original [RapidLeech by Th3-822](https://github.com/Th3-822/rapidleech)

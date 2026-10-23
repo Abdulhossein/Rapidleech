@@ -35,8 +35,8 @@ function table_filelist_refresh_headers() {
 }
 
 function switchCell(m) {
-	$('#tb1, #tb2, #tb3, #tb4').hide();
-	$('#navcell1, #navcell2, #navcell3, #navcell4').removeClass('selected');
+	$('#tb1, #tb2, #tb3, #tb4, #tb5').hide();
+	$('#navcell1, #navcell2, #navcell3, #navcell4, #navcell5').removeClass('selected');
 	$('#navcell' + m).addClass('selected');
 	$('#tb' + m).fadeIn('slow');
 	if (m == 3 && $('#table_filelist_h').length != 0) {

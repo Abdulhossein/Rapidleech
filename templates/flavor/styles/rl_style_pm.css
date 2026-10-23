@@ -129,8 +129,8 @@ center{text-align:center}
 /* ---------- Buttons ---------- */
 .fl-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;font:600 14px/1 var(--fl-font);border:0;border-radius:var(--fl-r);cursor:pointer;transition:all .2s;text-decoration:none}
 .fl-btn:hover{text-decoration:none}
-.fl-btn-primary{background:var(--fl-gradient);color:#fff;box-shadow:var(--fl-shadow-accent)}
-.fl-btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 24px var(--fl-accent-glow);color:#fff}
+.fl-btn-primary{background:var(--fl-gradient);color:#fff;box-shadow:var(--fl-shadow-accent);letter-spacing:.3px}
+.fl-btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 28px var(--fl-accent-glow);color:#fff}
 .fl-btn-ghost{background:var(--fl-surface-alt);color:var(--fl-text);border:1px solid var(--fl-border)}
 .fl-btn-ghost:hover{background:var(--fl-surface-hover);color:var(--fl-text)}
 .fl-btn-sm{padding:7px 14px;font-size:13px}
@@ -214,6 +214,12 @@ input[type="submit"]:hover,input[type="button"]:hover,button:hover{transform:tra
 .htmlerror,.htmlerror *,.htmlerror b,.htmlerror a{color:var(--fl-danger);font-weight:500;line-height:1.6;word-wrap:break-word;word-break:break-word;overflow-wrap:break-word;max-width:100%;text-decoration:none!important;border:none!important;border-width:0!important;outline:none!important;box-shadow:none!important;text-decoration-line:none!important}
 .htmlerror pre,.htmlerror details,.htmlerror summary{color:var(--fl-text-2)!important;font-weight:400!important;white-space:pre-wrap!important;word-wrap:break-word!important;word-break:break-all!important;overflow-wrap:break-word!important;max-width:100%!important;overflow-x:hidden!important}
 .autodel{color:var(--fl-warn);font-weight:500;padding:8px 16px;background:rgba(245,158,11,.08);border-radius:var(--fl-r-full);display:inline-block;font-size:13px}
+
+/* ---------- File input (Choose File button) ---------- */
+input[type="file"]{color:var(--fl-text-2);font:400 14px var(--fl-font)}
+input[type="file"]::file-selector-button{padding:10px 22px;margin-right:14px;font:600 14px/1 var(--fl-font);color:#fff;background:var(--fl-gradient);border:0;border-radius:var(--fl-r);cursor:pointer;transition:all .2s;box-shadow:var(--fl-shadow-accent)}
+input[type="file"]::file-selector-button:hover{transform:translateY(-1px);box-shadow:0 6px 24px var(--fl-accent-glow)}
+input[type="file"]::file-selector-button:active{transform:translateY(0)}
 
 /* ---------- Transfer UIs ---------- */
 .transloadui,.uploadui{text-align:center;padding:28px;background:var(--fl-surface);border-radius:var(--fl-r-lg);box-shadow:var(--fl-shadow);max-width:500px;margin:20px auto;border:1px solid var(--fl-border)}

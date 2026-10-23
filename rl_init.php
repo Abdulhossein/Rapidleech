@@ -32,7 +32,7 @@ define('CLASS_DIR', 'classes/');
 define('CONFIG_DIR', 'configs/');
 define('BUILD', '30May2011');
 define('RL_VERSION', $rl_version);
-define('CREDITS', '<a href="https://github.com/PBhadoo/Rapidleech" class="rl-link"><b>RapidLeech</b></a> <b class="rev-dev">v' . $rl_version . '</b>&nbsp;<b class="rev-dev">PlugMod (eqbal) rev. ' . $rev_num . '</b> <span class="rev-dev">' . $dev_name . '</span><br><small class="small-credits">Built with <a href="https://www.anthropic.com/">Claude Opus 4.6</a> by <a href="https://www.anthropic.com/">Anthropic</a></small><br><a href="https://hits.seeyoufarm.com"><img src="https://hits.sh/rapidleech.hashhackers.com.svg?view=today-total&style=for-the-badge&label=Visitors&color=0d1117&labelColor=00aaff"/></a><br><small class="small-credits">For DMCA contact dmca@hashhackers.com, please allow 48 hours to process DMCA requests.</small>');
+define('CREDITS', '<a href="https://github.com/Abdulhossein/Rapidleech" class="rl-link"><b>RapidLeech</b></a> <b class="rev-dev">v' . $rl_version . '</b>&nbsp;<b class="rev-dev">PlugMod (eqbal) rev. ' . $rev_num . '</b> <span class="rev-dev">' . $dev_name . '</span><br><a href="https://hits.seeyoufarm.com"><img src="https://hits.sh/rapidleech.hashhackers.com.svg?view=today-total&style=for-the-badge&label=Visitors&color=0d1117&labelColor=00aaff"/></a><br><small class="small-credits">For DMCA contact dmca@hashhackers.com, please allow 48 hours to process DMCA requests.</small>');
 
 require_once(CONFIG_DIR . 'setup.php');
 

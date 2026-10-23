@@ -7,7 +7,7 @@ Build and Edited from https://github.com/Th3-822/rapidleech
 #### Quick Install (Ubuntu 22.04 / 24.04)
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/PBhadoo/Rapidleech/main/rapidleech.sh)
+bash <(curl -s https://raw.githubusercontent.com/Abdulhossein/Rapidleech/main/rapidleech.sh)
 ```
 
 This installs PHP 8.3, Apache2, yt-dlp, ffmpeg, Deno, and all required extensions. Optionally sets up SSL.
@@ -147,13 +147,13 @@ Or use the Admin Panel at `/admin` → "Update from GitHub" button.
 
 ### Credits
 
-- **AI Development Assistant** — [Claude Opus 4.6](https://www.anthropic.com/) by [Anthropic](https://www.anthropic.com/), used extensively for code development, refactoring, and modernization of this project.
+- **Maintained by** — [Abdulhossein](https://github.com/Abdulhossein).
+- **Special thanks** — [PBhadoo/Rapidleech](https://github.com/PBhadoo/Rapidleech) for the modernized codebase this fork builds on.
 - **Original RapidLeech** — Based on the work by [Th3-822](https://github.com/Th3-822/rapidleech).
-- **Maintained by** — [PBhadoo](https://github.com/PBhadoo).
 
 ### Copyright
 
-Copyright © 2024-2026 [PBhadoo](https://github.com/PBhadoo). All rights reserved.
+Copyright © 2024-2026 [Abdulhossein](https://github.com/Abdulhossein). All rights reserved.
 
 This project is provided as-is for personal and educational use. Redistribution and modification are permitted provided that credit is given to the original authors and contributors listed above.
 

@@ -356,7 +356,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             break;
 
         case 'git_update':
-            $repoUrl = trim($_POST['repo_url'] ?? 'https://github.com/PBhadoo/Rapidleech');
+            $repoUrl = trim($_POST['repo_url'] ?? 'https://github.com/Abdulhossein/Rapidleech');
             $branch = trim($_POST['repo_branch'] ?? 'main');
             $fullReset = !empty($_POST['full_reset']);
             if (!preg_match('/^https:\/\/[a-zA-Z0-9._\-\/]+$/', $repoUrl)) {
@@ -787,7 +787,7 @@ label.check input{accent-color:#6366f1}
             <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px">
                 <div>
                     <label style="display:block;font-size:12px;color:#606880;margin-bottom:4px">Repository URL</label>
-                    <input type="text" name="repo_url" placeholder="https://github.com/PBhadoo/Rapidleech" value="<?php echo htmlspecialchars($_POST['repo_url'] ?? 'https://github.com/PBhadoo/Rapidleech'); ?>">
+                    <input type="text" name="repo_url" placeholder="https://github.com/Abdulhossein/Rapidleech" value="<?php echo htmlspecialchars($_POST['repo_url'] ?? 'https://github.com/Abdulhossein/Rapidleech'); ?>">
                 </div>
                 <div style="min-width:120px">
                     <label style="display:block;font-size:12px;color:#606880;margin-bottom:4px">Branch</label>
@@ -910,9 +910,8 @@ label.check input{accent-color:#6366f1}
     </div>
 
     <div style="text-align:center;padding:20px;color:#606880;font-size:12px">
-        <a href="https://github.com/PBhadoo/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;font-weight:700;">RapidLeech</a> v2.0.2 • Admin Panel • PHP <?php echo PHP_VERSION; ?> • <?php echo PHP_OS; ?>
-        <br>Built with <a href="https://www.anthropic.com/" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;">Claude Opus 4.6</a> by <a href="https://www.anthropic.com/" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;">Anthropic</a>
-        <br>&copy; <?php echo date('Y'); ?> <a href="https://github.com/PBhadoo/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;">PBhadoo</a>. All rights reserved.
+        <a href="https://github.com/Abdulhossein/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;font-weight:700;">RapidLeech</a> v2.0.2 • Admin Panel • PHP <?php echo PHP_VERSION; ?> • <?php echo PHP_OS; ?>
+        <br>&copy; <?php echo date('Y'); ?> <a href="https://github.com/Abdulhossein/Rapidleech" target="_blank" rel="noopener" style="color:#818cf8;text-decoration:none;">Abdulhossein</a>. All rights reserved.
     </div>
 </div>
 <script>

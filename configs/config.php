@@ -5,7 +5,7 @@ if (!defined('RAPIDLEECH')) {
 }
 
 $options = array (
-  'secretkey' => 'Evp1dftLD0Gm6bXgjtkd+dFSgNTHr7j6qy1JHgtGSJIC4I7ZwsSkJ3pG',
+  'secretkey' => 'Evp1dftLD0Gm6bXgjtkFSgNTHr7j6qy1JHgtGSJIC4I7ZwsSkJ3pG',
   'download_dir' => 'files/',
   'download_dir_is_changeable' => false,
   'delete_delay' => 84600.0,
@@ -13,16 +13,16 @@ $options = array (
   'rename_suffix' => '',
   'rename_underscore' => true,
   'bw_save' => false,
-  'file_size_limit' => 102400,
+  'file_size_limit' => 51200,
   'auto_download_disable' => false,
   'auto_upload_disable' => false,
   'notes_disable' => false,
   'upload_html_disable' => false,
   'myuploads_disable' => false,
-  'login' => false,
+  'login' => true,
   'users' => 
   array (
-    'transload' => 'transload',
+    'user' => 'user',
   ),
   'template_used' => 'flavor',
   'default_language' => 'en',
@@ -41,7 +41,7 @@ $options = array (
   'disable_mass_email' => true,
   'disable_email' => true,
   'disable_ftp' => true,
-  'disable_upload' => true,
+  'disable_upload' => false,
   'disable_merge' => false,
   'disable_split' => false,
   'disable_archive_compression' => false,

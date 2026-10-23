@@ -94,6 +94,10 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
                 <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
                 Pending
             </button>
+            <button id="navcell5" class="cell-nav" onclick="javascript:switchCell(5);">
+                <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M12 2L5 12h5v8h4v-8h5z"/></svg>
+                Local Upload
+            </button>
         </nav>
 
         <!-- Tab 1: Transload -->
@@ -311,6 +315,27 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
                 </div>
             </div>
 
+            <!-- Tab 5: Local Upload -->
+            <div class="hide-table tab-content" id="tb5">
+                <div style="display:grid;gap:20px;">
+                    <div class="rl-form-group">
+                        <label class="fl-label" for="localfile">Select file to upload</label>
+                        <input type="file" id="localfile" name="localfile">
+                    </div>
+                    <div>
+                        <button type="button" onclick="uploadLocalFile();" class="fl-btn fl-btn-primary fl-btn-block">Upload Local File</button>
+                    </div>
+                    <div>
+                        <progress id="uploadProgress" max="100" value="0" style="width:100%;"></progress>
+                    </div>
+                    <div id="uploadResult" style="display:none;padding:14px;background:var(--fl-accent-bg);border:1px solid var(--fl-border);border-radius:var(--fl-r);overflow-wrap:anywhere;">
+                        <strong id="resultFilename"></strong><br>
+                        <a id="resultLink" href=""></a>
+                    </div>
+                    <div id="uploadError" role="alert" style="display:none;color:var(--fl-danger);"></div>
+                </div>
+            </div>
+
             <script type="text/javascript">
             /* <![CDATA[ */
             var pendingDownloadsTimer=null;
@@ -319,6 +344,64 @@ if (!defined('RAPIDLEECH')) { require_once("index.html"); exit; }
             function startPendingDownloadsRefresh(){if(pendingDownloadsTimer)clearInterval(pendingDownloadsTimer);$('#pending-downloads-loading').show();refreshPendingDownloads();pendingDownloadsTimer=setInterval(refreshPendingDownloads,3000);}
             function stopPendingDownloadsRefresh(){if(pendingDownloadsTimer){clearInterval(pendingDownloadsTimer);pendingDownloadsTimer=null;}}
             $(document).ready(function(){$('#navcell4').on('click',function(){startPendingDownloadsRefresh();});});
+            /* ]]> */
+            </script>
+
+            <script type="text/javascript">
+            /* <![CDATA[ */
+            function uploadLocalFile(){
+                var fileInput = document.getElementById('localfile');
+                var progress = document.getElementById('uploadProgress');
+                var resultBox = document.getElementById('uploadResult');
+                var errorBox = document.getElementById('uploadError');
+                var resultFilename = document.getElementById('resultFilename');
+                var resultLink = document.getElementById('resultLink');
+                if(!fileInput.files || fileInput.files.length === 0){
+                    alert('Please select a file to upload');
+                    return;
+                }
+                resultBox.style.display = 'none';
+                errorBox.style.display = 'none';
+                progress.value = 0;
+                var formData = new FormData();
+                formData.append('localfile', fileInput.files[0]);
+                var xhr = new XMLHttpRequest();
+                xhr.upload.addEventListener('progress', function(e){
+                    if(e.lengthComputable){
+                        var percent = Math.round((e.loaded / e.total) * 100);
+                        progress.value = percent;
+                    }
+                });
+                xhr.addEventListener('load', function(){
+                    var response;
+                    try {
+                        response = JSON.parse(xhr.responseText);
+                    } catch (e) {
+                        response = {status:'error',message:'The server returned an unreadable response. Check PHP upload limits and server logs.'};
+                    }
+                    if(xhr.status >= 200 && xhr.status < 300){
+                        if(response.status === 'ok'){
+                            progress.value = 100;
+                            resultFilename.textContent = response.filename;
+                            resultLink.textContent = response.link;
+                            resultLink.href = response.link;
+                            resultBox.style.display = 'block';
+                        } else {
+                            errorBox.textContent = response.message || 'Upload failed.';
+                            errorBox.style.display = 'block';
+                        }
+                    } else {
+                        errorBox.textContent = response.message || ('Upload failed with HTTP status ' + xhr.status + '.');
+                        errorBox.style.display = 'block';
+                    }
+                });
+                xhr.addEventListener('error', function(){
+                    errorBox.textContent = 'Network error while uploading. Please try again.';
+                    errorBox.style.display = 'block';
+                });
+                xhr.open('POST', 'local_upload.php');
+                xhr.send(formData);
+            }
             /* ]]> */
             </script>
         </div>
